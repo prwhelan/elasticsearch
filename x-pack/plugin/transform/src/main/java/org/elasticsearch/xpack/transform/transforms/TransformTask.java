@@ -626,16 +626,14 @@ public class TransformTask extends AllocatedPersistentTask implements TransformS
         ActionListener<Boolean> retryScheduledListener
     ) {
         if (shouldRetryUnattended()) {
-            return ActionListener.running(
-                retryableActions.register(
-                    getTransformId(),
-                    name,
+            return ActionListener.running(() -> {
+                transformScheduler.registerTransform(transform, new TransformRetryableListener<>(
                     action,
-                    ignoreStopCallForUnattended(listener),
+                    ActionListener.runBefore(listener, () -> transformScheduler.deregisterTransform(transform.getId())),
                     retryScheduledListener,
                     this::shouldRetryUnattended
-                )
-            );
+                ));
+            });
         } else {
             return ActionListener.running(() -> {
                 retryScheduledListener.onResponse(false);
@@ -651,21 +649,6 @@ public class TransformTask extends AllocatedPersistentTask implements TransformS
             .map(TransformConfig::getSettings)
             .map(TransformEffectiveSettings::isUnattended)
             .orElse(true);
-    }
-
-    /**
-     * For unattended transforms, we ignore the stop failures since the system will take care of cleaning up the actions.
-     * Retryables are stopped via the Transform's {@link #stop(boolean, boolean)} and {@link #shutdown()} API, which will take care of
-     * moving the Transform into the correct state.
-     */
-    private <Response> ActionListener<Response> ignoreStopCallForUnattended(ActionListener<Response> listener) {
-        return listener.delegateResponse((l, e) -> {
-            var isNotStopCall = retryableActions.isStopRetryableCall(e) == false;
-            var isNotUnattended = shouldRetryUnattended() == false;
-            if (isNotStopCall || isNotUnattended) {
-                listener.onFailure(e);
-            }
-        });
     }
 
     List<TransformRetryableActions.TransformRetryDescription> startupTasks() {

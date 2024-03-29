@@ -1723,8 +1723,8 @@ public class IndicesService extends AbstractLifecycleComponent
     /**
      * Returns a new {@link QueryRewriteContext} with the given {@code now} provider
      */
-    public QueryRewriteContext getRewriteContext(LongSupplier nowInMillis) {
-        return new QueryRewriteContext(parserConfig, client, nowInMillis);
+    public QueryRewriteContext getRewriteContext(LongSupplier nowInMillis, @Nullable TimeValue timeout) {
+        return new QueryRewriteContext(parserConfig, client, nowInMillis, timeout);
     }
 
     public DataRewriteContext getDataRewriteContext(LongSupplier nowInMillis) {

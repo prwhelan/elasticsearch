@@ -13,6 +13,7 @@ import org.elasticsearch.common.collect.Iterators;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.regex.Regex;
 import org.elasticsearch.common.util.concurrent.CountDown;
+import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.index.Index;
 import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.index.analysis.IndexAnalyzers;
@@ -32,6 +33,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
@@ -60,6 +62,43 @@ public class QueryRewriteContext {
     protected boolean allowUnmappedFields;
     protected boolean mapUnmappedFieldAsString;
     protected Predicate<String> allowedFields;
+    private final TimeValue timeout;
+
+    public QueryRewriteContext(
+        final XContentParserConfiguration parserConfiguration,
+        final Client client,
+        final LongSupplier nowInMillis,
+        final MapperService mapperService,
+        final MappingLookup mappingLookup,
+        final Map<String, MappedFieldType> runtimeMappings,
+        final Predicate<String> allowedFields,
+        final IndexSettings indexSettings,
+        final Index fullyQualifiedIndex,
+        final Predicate<String> indexNameMatcher,
+        final NamedWriteableRegistry namedWriteableRegistry,
+        final ValuesSourceRegistry valuesSourceRegistry,
+        final BooleanSupplier allowExpensiveQueries,
+        final ScriptCompiler scriptService,
+        final TimeValue timeout
+    ) {
+
+        this.parserConfiguration = parserConfiguration;
+        this.client = client;
+        this.nowInMillis = nowInMillis;
+        this.mapperService = mapperService;
+        this.mappingLookup = Objects.requireNonNull(mappingLookup);
+        this.allowUnmappedFields = indexSettings == null || indexSettings.isDefaultAllowUnmappedFields();
+        this.runtimeMappings = runtimeMappings;
+        this.allowedFields = allowedFields;
+        this.indexSettings = indexSettings;
+        this.fullyQualifiedIndex = fullyQualifiedIndex;
+        this.indexNameMatcher = indexNameMatcher;
+        this.writeableRegistry = namedWriteableRegistry;
+        this.valuesSourceRegistry = valuesSourceRegistry;
+        this.allowExpensiveQueries = allowExpensiveQueries;
+        this.scriptService = scriptService;
+        this.timeout = timeout;
+    }
 
     public QueryRewriteContext(
         final XContentParserConfiguration parserConfiguration,
@@ -93,6 +132,7 @@ public class QueryRewriteContext {
         this.valuesSourceRegistry = valuesSourceRegistry;
         this.allowExpensiveQueries = allowExpensiveQueries;
         this.scriptService = scriptService;
+        this.timeout = null;
     }
 
     public QueryRewriteContext(final XContentParserConfiguration parserConfiguration, final Client client, final LongSupplier nowInMillis) {
@@ -110,7 +150,28 @@ public class QueryRewriteContext {
             null,
             null,
             null,
+            null,
             null
+        );
+    }
+
+    public QueryRewriteContext(final XContentParserConfiguration parserConfiguration, final Client client, final LongSupplier nowInMillis, final TimeValue timeout) {
+        this(
+            parserConfiguration,
+            client,
+            nowInMillis,
+            null,
+            MappingLookup.EMPTY,
+            Collections.emptyMap(),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            timeout
         );
     }
 
@@ -359,5 +420,9 @@ public class QueryRewriteContext {
             : runtimeMappings.entrySet().stream().filter(entry -> allowedFields.test(entry.getKey())).collect(Collectors.toSet());
         // runtime mappings and non-runtime fields don't overlap, so we can simply concatenate the iterables here
         return () -> Iterators.concat(allEntrySet.iterator(), runtimeEntrySet.iterator());
+    }
+
+    public Optional<TimeValue> timeout() {
+        return Optional.ofNullable(timeout);
     }
 }

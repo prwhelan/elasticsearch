@@ -22,6 +22,8 @@ import org.elasticsearch.xpack.inference.external.request.Request;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.BiConsumer;
 
 import static org.elasticsearch.xpack.inference.external.request.RequestUtils.createAuthBearerHeader;
@@ -44,23 +46,35 @@ public class DittoRequest implements Request {
         httpPost.setHeader(HttpHeaders.ACCEPT, XContentType.JSON.mediaType());
         httpPost.setHeader(HttpHeaders.CONTENT_TYPE, XContentType.JSON.mediaType());
         httpPost.setHeader(createAuthBearerHeader(dittoModel.getSecretSettings().apiKey()));
+        // TODO brittle, we should guarantee Map<String, String> during storage
+        dittoModel.getServiceSettings().headers().forEach((key, value) -> httpPost.setHeader(key, String.valueOf(value)));
+        override(dittoModel.getTaskSettings().headers(), dittoInput.taskSettings().headers()).forEach(
+            (key, value) -> httpPost.setHeader(key, String.valueOf(value))
+        );
+        dittoInput.headers().forEach((key, value) -> httpPost.setHeader(key, String.valueOf(value)));
 
         ToXContent bodyContent = (builder, params) -> {
             var safeField = safeField(builder);
             builder.startObject();
-            dittoModel.getServiceSettings().settings().forEach(safeField);
-            dittoModel.getTaskSettings().settings().forEach(safeField);
-            dittoInput.input().forEach(safeField);
+            dittoModel.getServiceSettings().body().forEach(safeField);
+            dittoInput.taskSettings().body().forEach(safeField);
+            override(dittoModel.getTaskSettings().body(), dittoInput.taskSettings().body()).forEach(safeField);
+            dittoInput.body().forEach(safeField);
             builder.endObject();
             return builder;
         };
 
-        var byteEntity = new ByteArrayEntity(
-            Strings.toString(bodyContent).getBytes(StandardCharsets.UTF_8)
-        );
+        var byteEntity = new ByteArrayEntity(Strings.toString(bodyContent).getBytes(StandardCharsets.UTF_8));
         httpPost.setEntity(byteEntity);
 
         return new HttpRequest(httpPost, getInferenceEntityId());
+    }
+
+    private Map<String, Object> override(Map<String, Object> base, Map<String, Object> override) {
+        var map = new HashMap<String, Object>();
+        map.putAll(base);
+        map.putAll(override);
+        return map;
     }
 
     private BiConsumer<String, Object> safeField(XContentBuilder builder) {
@@ -75,7 +89,7 @@ public class DittoRequest implements Request {
 
     @Override
     public URI getURI() {
-        return dittoModel.getServiceSettings().uri();
+        return dittoModel.getTaskSettings().uri();
     }
 
     @Override

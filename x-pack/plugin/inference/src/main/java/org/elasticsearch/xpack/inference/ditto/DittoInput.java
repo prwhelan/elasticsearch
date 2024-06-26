@@ -12,7 +12,9 @@ import org.elasticsearch.xpack.inference.common.Truncator;
 import java.util.Map;
 
 public interface DittoInput {
-    Map<String, Object> input();
+    Map<String, Object> headers();
+    Map<String, Object> body();
+    DittoTaskSettings taskSettings();
 
     DittoInput truncate(Truncator truncator);
 

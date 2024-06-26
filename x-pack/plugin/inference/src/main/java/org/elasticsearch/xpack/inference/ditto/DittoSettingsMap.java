@@ -20,35 +20,49 @@ import java.util.Map;
 import java.util.Set;
 
 abstract class DittoSettingsMap implements ToXContentObject, VersionedNamedWriteable {
-    private final Map<String, Object> settings;
+    private final Map<String, Object> headers;
+    private final Map<String, Object> body;
     private final XContentType contentType;
 
-    DittoSettingsMap(Map<String, Object> settings, XContentType contentType) {
-        this.settings = settings;
+    DittoSettingsMap(Map<String, Object> headers, Map<String, Object> body, XContentType contentType) {
+        this.headers = headers;
+        this.body = body;
         this.contentType = contentType;
     }
 
-    protected Map<String, Object> settings() {
-        return settings;
+    @SuppressWarnings({ "unchecked" })
+    DittoSettingsMap(Map<String, Object> storageMap) {
+        this.headers = (Map<String, Object>) storageMap.get("headers");
+        this.body = (Map<String, Object>) storageMap.get("body");
+        this.contentType = (XContentType) storageMap.get("contentType");
+    }
+
+    public Map<String, Object> headers() {
+        return headers;
+    }
+
+    public Map<String, Object> body() {
+        return body;
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        try (
-            XContentBuilder builder = XContentBuilder.builder(contentType, Set.of(), Set.of()).map(settings);
-        ) {
-            out.writeString(Strings.toString(builder));
+        try (XContentBuilder builder = XContentBuilder.builder(contentType, Set.of(), Set.of())) {
+            out.writeString(Strings.toString(toXContent(builder, EMPTY_PARAMS)));
         }
         XContentHelper.writeTo(out, contentType);
     }
 
     @Override
-    public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
+    public final XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
         builder.startObject();
-        builder.field("taskSettings");
-        builder.map(settings);
+        builder.field("headers").map(headers);
+        builder.field("body").map(body);
         builder.field("contentType", contentType);
-        builder.endObject();
+        return toXContentFragment(builder, params).endObject();
+    }
+
+    protected XContentBuilder toXContentFragment(XContentBuilder builder, Params params) throws IOException {
         return builder;
     }
 }

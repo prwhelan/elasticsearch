@@ -11,13 +11,15 @@ import org.elasticsearch.TransportVersion;
 import org.elasticsearch.common.settings.SecureString;
 import org.elasticsearch.inference.SecretSettings;
 import org.elasticsearch.xcontent.XContentType;
+import org.elasticsearch.xpack.inference.services.ServiceUtils;
+import org.elasticsearch.xpack.inference.services.settings.DefaultSecretSettings;
 
 import java.util.Map;
 
 public class DittoSecretSettings extends DittoSettingsMap implements SecretSettings {
 
     public DittoSecretSettings(Map<String, Object> secretSettings, XContentType contentType) {
-        super(secretSettings, contentType);
+        super(secretSettings, Map.of(), contentType);
     }
 
     @Override
@@ -27,10 +29,20 @@ public class DittoSecretSettings extends DittoSettingsMap implements SecretSetti
 
     @Override
     public TransportVersion getMinimalSupportedVersion() {
-        return TransportVersion.current(); //TODO
+        return TransportVersion.current(); // TODO
+    }
+
+    @Override
+    public Map<String, Object> headers() {
+        return Map.of();
+    }
+
+    @Override
+    public Map<String, Object> body() {
+        return Map.of();
     }
 
     public SecureString apiKey() {
-        return null;
+        return ServiceUtils.apiKey(DefaultSecretSettings.fromMap(headers()));
     }
 }

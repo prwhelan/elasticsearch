@@ -12,15 +12,27 @@ import org.elasticsearch.index.mapper.vectors.DenseVectorFieldMapper;
 import org.elasticsearch.inference.ServiceSettings;
 import org.elasticsearch.inference.SimilarityMeasure;
 import org.elasticsearch.xcontent.ToXContentObject;
+import org.elasticsearch.xcontent.XContentBuilder;
 import org.elasticsearch.xcontent.XContentType;
 
+import java.io.IOException;
 import java.net.URI;
 import java.util.Map;
+import java.util.Optional;
+
+import static org.elasticsearch.xpack.inference.services.ServiceUtils.removeAsType;
 
 public class DittoServiceSettings extends DittoSettingsMap implements ServiceSettings {
+    private final Integer tokenLimit;
 
-    public DittoServiceSettings(Map<String, Object> serviceSettings, XContentType contentType) {
-        super(serviceSettings, contentType);
+    public DittoServiceSettings(Map<String, Object> headers, Map<String, Object> body, XContentType contentType, Integer tokenLimit) {
+        super(headers, body, contentType);
+        this.tokenLimit = tokenLimit;
+    }
+
+    private DittoServiceSettings(Map<String, Object> storageMap, Integer tokenLimit) {
+        super(storageMap);
+        this.tokenLimit = tokenLimit;
     }
 
     @Override
@@ -30,7 +42,7 @@ public class DittoServiceSettings extends DittoSettingsMap implements ServiceSet
 
     @Override
     public TransportVersion getMinimalSupportedVersion() {
-        return TransportVersion.current(); //TODO
+        return TransportVersion.current(); // TODO
     }
 
     @Override
@@ -53,12 +65,19 @@ public class DittoServiceSettings extends DittoSettingsMap implements ServiceSet
         return ServiceSettings.super.elementType();
     }
 
-    @Override
-    public boolean isFragment() {
-        return ServiceSettings.super.isFragment();
+    public Integer tokenLimit() {
+        return tokenLimit;
     }
 
-    public URI uri() {
-        return null;
+    protected XContentBuilder toXContentFragment(XContentBuilder builder, Params params) throws IOException {
+        if (tokenLimit != null) {
+            builder.field("tokenLimit", tokenLimit);
+        }
+        return builder;
+    }
+
+    public static DittoServiceSettings fromStorage(Map<String, Object> storage) {
+        var tokenLimit = removeAsType(storage, "tokenLimit", Integer.class);
+        return new DittoServiceSettings(storage, tokenLimit);
     }
 }

@@ -18,14 +18,17 @@ public class DittoModel extends Model {
     private final DittoTaskSettings taskSettings;
 
     public DittoModel(
-        String modelId,
+        String inferenceEntityId,
         TaskType taskType,
         String service,
         DittoServiceSettings serviceSettings,
         DittoSecretSettings secretSettings,
         DittoTaskSettings taskSettings
     ) {
-        super(new ModelConfigurations(modelId, taskType, service, serviceSettings, taskSettings), new ModelSecrets(secretSettings));
+        super(
+            new ModelConfigurations(inferenceEntityId, taskType, service, serviceSettings, taskSettings),
+            new ModelSecrets(secretSettings)
+        );
         this.serviceSettings = serviceSettings;
         this.secretSettings = secretSettings;
         this.taskSettings = taskSettings;

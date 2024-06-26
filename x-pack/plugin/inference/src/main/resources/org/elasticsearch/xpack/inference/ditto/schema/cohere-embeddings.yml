@@ -1,0 +1,17 @@
+version: 0.0.0
+_meta:
+  description: Schema for the Cohere Embeddings integration
+service: cohere
+type: embedding
+uri: https://api.cohere.com/v1/embed
+auth:
+  type: api-key
+  location: "{{ service_settings.api_key }}"
+headers:
+  X-Client-Name: unspecified:elasticsearch
+body:
+  model: "{{ service_settings.model_id | embed-english-v2.0 }}"
+  texts: "{{ inference_request.input }}"
+  input_type: "{{ task_settings.input_type ? }}"
+  embedding_types: "{{ service_settings.embedding_type | float }}"
+  truncate: "{{ inference_request.truncate ? }}"

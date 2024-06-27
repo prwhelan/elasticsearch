@@ -16,6 +16,8 @@ public class DittoModel extends Model {
     private final DittoServiceSettings serviceSettings;
     private final DittoSecretSettings secretSettings;
     private final DittoTaskSettings taskSettings;
+    private final String service;
+    private final TaskType taskType;
 
     public DittoModel(
         String inferenceEntityId,
@@ -32,6 +34,12 @@ public class DittoModel extends Model {
         this.serviceSettings = serviceSettings;
         this.secretSettings = secretSettings;
         this.taskSettings = taskSettings;
+        this.service = service;
+        this.taskType = taskType;
+    }
+
+    public String humanReadableName() {
+        return service + " " + taskType.toString();
     }
 
     @Override

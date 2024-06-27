@@ -13,7 +13,9 @@ import java.util.Map;
 
 public interface DittoInput {
     Map<String, Object> headers();
+
     Map<String, Object> body();
+
     DittoTaskSettings taskSettings();
 
     DittoInput truncate(Truncator truncator);

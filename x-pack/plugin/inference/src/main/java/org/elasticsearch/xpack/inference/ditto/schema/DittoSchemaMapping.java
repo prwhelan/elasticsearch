@@ -9,5 +9,4 @@ package org.elasticsearch.xpack.inference.ditto.schema;
 
 import org.elasticsearch.core.Nullable;
 
-record DittoSchemaMapping(String key, boolean required, @Nullable Object defaultValue) {
-}
+record DittoSchemaMapping(String key, boolean required, @Nullable Object defaultValue) {}

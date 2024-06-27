@@ -16,11 +16,14 @@ import org.elasticsearch.xpack.inference.ditto.DittoSecretSettings;
 import org.elasticsearch.xpack.inference.ditto.DittoServiceSettings;
 import org.elasticsearch.xpack.inference.ditto.DittoTaskSettings;
 import org.elasticsearch.xpack.inference.ditto.ElasticDittoInput;
+import org.elasticsearch.xpack.inference.external.http.retry.ResponseHandler;
+import org.elasticsearch.xpack.inference.services.settings.RateLimitSettings;
 
 import java.net.URI;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -29,6 +32,8 @@ public class DittoSchema {
     private final String type;
     private final URI uri;
     private final Integer tokenLimit;
+    private final Long rateLimit;
+    private final Object rateLimitGroup;
     private final Map<List<String>, DittoSchemaMapping> taskSettingsHeaders;
     private final Map<List<String>, DittoSchemaMapping> taskSettingsBody;
     private final Map<List<String>, DittoSchemaMapping> serviceSettingsHeaders;
@@ -38,12 +43,15 @@ public class DittoSchema {
     private final Map<List<String>, DittoSchemaMapping> inferenceRequestBody;
     private final Map<String, String> hardcodedHeaders;
     private final Map<String, String> hardcodedBody;
+    private final Map<List<String>, DittoSchemaMapping> inferenceResponseBody;
 
     DittoSchema(
         String name,
         String type,
         URI uri,
         Integer tokenLimit,
+        Long rateLimit,
+        Object rateLimitGroup,
         Map<List<String>, DittoSchemaMapping> taskSettingsHeaders,
         Map<List<String>, DittoSchemaMapping> taskSettingsBody,
         Map<List<String>, DittoSchemaMapping> serviceSettingsHeaders,
@@ -52,12 +60,15 @@ public class DittoSchema {
         Map<List<String>, DittoSchemaMapping> inferenceRequestHeaders,
         Map<List<String>, DittoSchemaMapping> inferenceRequestBody,
         Map<String, String> hardcodedHeaders,
-        Map<String, String> hardcodedBody
+        Map<String, String> hardcodedBody,
+        Map<List<String>, DittoSchemaMapping> inferenceResponseBody
     ) {
         this.name = name;
         this.type = type;
         this.uri = uri;
         this.tokenLimit = tokenLimit;
+        this.rateLimit = rateLimit;
+        this.rateLimitGroup = rateLimitGroup;
         this.taskSettingsHeaders = taskSettingsHeaders;
         this.taskSettingsBody = taskSettingsBody;
         this.serviceSettingsHeaders = serviceSettingsHeaders;
@@ -67,6 +78,7 @@ public class DittoSchema {
         this.inferenceRequestBody = inferenceRequestBody;
         this.hardcodedHeaders = hardcodedHeaders;
         this.hardcodedBody = hardcodedBody;
+        this.inferenceResponseBody = inferenceResponseBody;
     }
 
     public DittoServiceSettings parseServiceSettings(Map<String, Object> config) {
@@ -74,7 +86,9 @@ public class DittoSchema {
             parse(serviceSettingsHeaders, config),
             parse(serviceSettingsBody, config),
             XContentType.JSON,
-            tokenLimit
+            tokenLimit,
+            new RateLimitSettings(rateLimit),
+            rateLimitGroup == null ? UUID.randomUUID().hashCode() : rateLimitGroup.hashCode()
         );
     }
 
@@ -171,6 +185,10 @@ public class DittoSchema {
             }
         });
         return map;
+    }
+
+    public ResponseHandler parseResponse() {
+        return new DittoResponseHandler(map -> parse(inferenceResponseBody, map));
     }
 
     public String name() {

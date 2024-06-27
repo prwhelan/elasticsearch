@@ -4,6 +4,7 @@ _meta:
 service: cohere
 type: embedding
 uri: https://api.cohere.com/v1/embed
+requestsPerMinute: 10
 auth:
   type: api-key
   location: "{{ service_settings.api_key }}"
@@ -15,3 +16,5 @@ body:
   input_type: "{{ task_settings.input_type ? }}"
   embedding_types: "{{ service_settings.embedding_type | float }}"
   truncate: "{{ inference_request.truncate ? }}"
+response:
+  embeddings: "{{ text_embedding.embedding }}"

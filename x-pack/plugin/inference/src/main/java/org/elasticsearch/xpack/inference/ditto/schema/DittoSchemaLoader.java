@@ -45,6 +45,8 @@ public class DittoSchemaLoader {
         var service = (String) ymlMap.get("service");
         var type = (String) ymlMap.get("type");
         var tokenLimit = (Integer) ymlMap.get("tokenLimit");
+        var rateLimit = Long.valueOf((Integer) ymlMap.get("requestsPerMinute"));
+        var rateLimitGroup = ymlMap.get("rateLimitGroup");
 
         var uri = URI.create((String) ymlMap.get("uri"));
 
@@ -62,11 +64,17 @@ public class DittoSchemaLoader {
         var taskSettingsBody = parseAnnoyingString("task_settings", body);
         var inferenceRequestBody = parseAnnoyingString("inference_request", body);
         var hardcodedInputBody = parseHardcoded(body);
+
+        var response = (Map<String, String>) ymlMap.get("response");
+        var responseBody = parseAnnoyingString("", body);
+
         return new DittoSchema(
             service,
             type,
             uri,
             tokenLimit,
+            rateLimit,
+            rateLimitGroup,
             taskSettingsHeaders,
             taskSettingsBody,
             serviceSettingsHeaders,
@@ -75,7 +83,8 @@ public class DittoSchemaLoader {
             inferenceRequestHeaders,
             inferenceRequestBody,
             hardcodedInputHeaders,
-            hardcodedInputBody
+            hardcodedInputBody,
+            responseBody
         );
     }
 

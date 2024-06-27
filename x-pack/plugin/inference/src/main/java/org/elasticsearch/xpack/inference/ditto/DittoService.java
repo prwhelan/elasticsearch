@@ -20,6 +20,8 @@ import org.elasticsearch.inference.TaskType;
 import org.elasticsearch.xcontent.XContentType;
 import org.elasticsearch.xpack.inference.common.Truncator;
 import org.elasticsearch.xpack.inference.ditto.schema.DittoSchema;
+import org.elasticsearch.xpack.inference.external.http.sender.DittoRequestManager;
+import org.elasticsearch.xpack.inference.external.http.sender.DocumentsOnlyInput;
 import org.elasticsearch.xpack.inference.external.http.sender.HttpRequestSender;
 import org.elasticsearch.xpack.inference.services.SenderService;
 import org.elasticsearch.xpack.inference.services.ServiceComponents;
@@ -47,11 +49,25 @@ public class DittoService extends SenderService {
         TimeValue timeout,
         ActionListener<InferenceServiceResults> listener
     ) {
-        if(model instanceof DittoModel dittoModel) {
+        if (model instanceof DittoModel dittoModel) {
             var tokenLimit = dittoModel.getServiceSettings().tokenLimit();
             var truncation = tokenLimit != null ? Truncator.truncate(input, tokenLimit) : null;
             var truncatedInput = truncation != null ? truncation.input() : input;
             var dittoInput = dittoSchema.parseInput(truncatedInput, truncation, null, taskSettings, inputType);
+            var dittoRequest = new DittoRequest(dittoModel, getServiceComponents().truncator(), dittoInput);
+            var rateLimitingGroup = dittoModel.getServiceSettings().rateLimitGroup();
+            var rateLimitingSettings = dittoModel.getServiceSettings().rateLimitSettings();
+            var responseHandler = dittoSchema.parseResponse();
+            var dittoRequestManager = new DittoRequestManager(
+                getServiceComponents().threadPool(),
+                dittoModel.getInferenceEntityId(),
+                rateLimitingGroup,
+                rateLimitingSettings,
+                dittoRequest,
+                responseHandler
+            );
+            var dittoExecution = new DittoExecutableAction(getSender(), dittoRequestManager, dittoModel);
+            dittoExecution.execute(new DocumentsOnlyInput(input), timeout, listener);
         }
     }
 

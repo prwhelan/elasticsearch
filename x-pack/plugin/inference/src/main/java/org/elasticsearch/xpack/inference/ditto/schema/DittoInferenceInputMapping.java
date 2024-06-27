@@ -7,5 +7,4 @@
 
 package org.elasticsearch.xpack.inference.ditto.schema;
 
-public record DittoInferenceInputMapping(String inputKey, String queryKey, String inputTypeKey) {
-}
+public record DittoInferenceInputMapping(String inputKey, String queryKey, String inputTypeKey) {}

@@ -18,7 +18,6 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.elasticsearch.xpack.inference.services.ServiceUtils.removeAsType;
-import static org.elasticsearch.xpack.inference.services.ServiceUtils.removeFromMapOrThrowIfNull;
 
 public class DittoTaskSettings extends DittoSettingsMap implements TaskSettings {
     private final URI uri;
@@ -53,9 +52,7 @@ public class DittoTaskSettings extends DittoSettingsMap implements TaskSettings 
     }
 
     public static DittoTaskSettings fromStorage(Map<String, Object> storageMap) {
-        var uri = Optional.ofNullable(removeAsType(storageMap, "uri", String.class))
-            .map(URI::create)
-            .orElseThrow();
+        var uri = Optional.ofNullable(removeAsType(storageMap, "uri", String.class)).map(URI::create).orElseThrow();
         return new DittoTaskSettings(storageMap, uri);
     }
 }

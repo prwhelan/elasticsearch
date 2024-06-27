@@ -9,6 +9,7 @@ package org.elasticsearch.xpack.inference.ditto.schema;
 
 import org.elasticsearch.ElasticsearchParseException;
 import org.elasticsearch.inference.InputType;
+import org.elasticsearch.inference.TaskType;
 import org.elasticsearch.xcontent.XContentType;
 import org.elasticsearch.xpack.inference.common.Truncator;
 import org.elasticsearch.xpack.inference.ditto.DittoInput;
@@ -88,7 +89,8 @@ public class DittoSchema {
             XContentType.JSON,
             tokenLimit,
             new RateLimitSettings(rateLimit),
-            rateLimitGroup == null ? UUID.randomUUID().hashCode() : rateLimitGroup.hashCode()
+            rateLimitGroup == null ? UUID.randomUUID().hashCode() : rateLimitGroup.hashCode(),
+            taskType()
         );
     }
 
@@ -193,5 +195,9 @@ public class DittoSchema {
 
     public String name() {
         return name;
+    }
+
+    public TaskType taskType() {
+        return type != null ? TaskType.fromString(type) : TaskType.ANY;
     }
 }

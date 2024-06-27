@@ -11,6 +11,7 @@ import org.elasticsearch.TransportVersion;
 import org.elasticsearch.index.mapper.vectors.DenseVectorFieldMapper;
 import org.elasticsearch.inference.ServiceSettings;
 import org.elasticsearch.inference.SimilarityMeasure;
+import org.elasticsearch.inference.TaskType;
 import org.elasticsearch.xcontent.ToXContentObject;
 import org.elasticsearch.xcontent.XContentBuilder;
 import org.elasticsearch.xcontent.XContentType;
@@ -27,6 +28,7 @@ public class DittoServiceSettings extends DittoSettingsMap implements ServiceSet
     private final Integer tokenLimit;
     private final RateLimitSettings rateLimitSettings;
     private final int rateLimitGroup;
+    private final TaskType taskType;
 
     public DittoServiceSettings(
         Map<String, Object> headers,
@@ -34,24 +36,28 @@ public class DittoServiceSettings extends DittoSettingsMap implements ServiceSet
         XContentType contentType,
         Integer tokenLimit,
         RateLimitSettings rateLimitSettings,
-        int rateLimitGroup
+        int rateLimitGroup,
+        TaskType taskType
     ) {
         super(headers, body, contentType);
         this.tokenLimit = tokenLimit;
         this.rateLimitSettings = rateLimitSettings;
         this.rateLimitGroup = rateLimitGroup;
+        this.taskType = taskType;
     }
 
     private DittoServiceSettings(
         Map<String, Object> storageMap,
         Integer tokenLimit,
         RateLimitSettings rateLimitSettings,
-        int rateLimitGroup
+        int rateLimitGroup,
+        TaskType taskType
     ) {
         super(storageMap);
         this.tokenLimit = tokenLimit;
         this.rateLimitSettings = rateLimitSettings;
         this.rateLimitGroup = rateLimitGroup;
+        this.taskType = taskType;
     }
 
     @Override
@@ -65,6 +71,10 @@ public class DittoServiceSettings extends DittoSettingsMap implements ServiceSet
 
     public RateLimitSettings rateLimitSettings() {
         return rateLimitSettings;
+    }
+
+    public TaskType taskType() {
+        return taskType;
     }
 
     @Override
@@ -102,6 +112,7 @@ public class DittoServiceSettings extends DittoSettingsMap implements ServiceSet
         }
         builder.field("RequestsPerMinute", rateLimitSettings.requestsPerTimeUnit());
         builder.field("rateLimitGroup", rateLimitGroup);
+        builder.field("taskType", taskType.toString());
         return builder;
     }
 
@@ -111,6 +122,7 @@ public class DittoServiceSettings extends DittoSettingsMap implements ServiceSet
             .map(RateLimitSettings::new)
             .orElseThrow();
         var rateLimitGroup = Integer.parseInt(removeStringOrThrowIfNull(storage, "rateLimitGroup"));
-        return new DittoServiceSettings(storage, tokenLimit, rateLimitSettings, rateLimitGroup);
+        var taskType = Optional.ofNullable(removeAsType(storage, "taskType", String.class)).map(TaskType::fromString).orElseThrow();
+        return new DittoServiceSettings(storage, tokenLimit, rateLimitSettings, rateLimitGroup, taskType);
     }
 }

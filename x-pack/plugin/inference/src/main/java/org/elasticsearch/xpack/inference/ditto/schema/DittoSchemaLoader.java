@@ -66,7 +66,7 @@ public class DittoSchemaLoader {
         var hardcodedInputBody = parseHardcoded(body);
 
         var response = (Map<String, String>) ymlMap.get("response");
-        var responseBody = parseAnnoyingString("", body);
+        var responseBody = parseAnnoyingString("", response);
 
         return new DittoSchema(
             service,

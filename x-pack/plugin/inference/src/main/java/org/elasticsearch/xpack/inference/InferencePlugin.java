@@ -51,6 +51,7 @@ import org.elasticsearch.xpack.inference.action.TransportInferenceUsageAction;
 import org.elasticsearch.xpack.inference.action.TransportPutInferenceModelAction;
 import org.elasticsearch.xpack.inference.action.filter.ShardBulkInferenceActionFilter;
 import org.elasticsearch.xpack.inference.common.Truncator;
+import org.elasticsearch.xpack.inference.ditto.schema.DittoSchemas;
 import org.elasticsearch.xpack.inference.external.http.HttpClientManager;
 import org.elasticsearch.xpack.inference.external.http.HttpSettings;
 import org.elasticsearch.xpack.inference.external.http.retry.RetrySettings;
@@ -190,18 +191,21 @@ public class InferencePlugin extends Plugin implements ActionPlugin, ExtensibleP
     }
 
     public List<InferenceServiceExtension.Factory> getInferenceServiceFactories() {
-        return List.of(
-            ElserInternalService::new,
-            context -> new HuggingFaceElserService(httpFactory.get(), serviceComponents.get()),
-            context -> new HuggingFaceService(httpFactory.get(), serviceComponents.get()),
-            context -> new OpenAiService(httpFactory.get(), serviceComponents.get()),
-            context -> new CohereService(httpFactory.get(), serviceComponents.get()),
-            context -> new AzureOpenAiService(httpFactory.get(), serviceComponents.get()),
-            context -> new AzureAiStudioService(httpFactory.get(), serviceComponents.get()),
-            context -> new GoogleAiStudioService(httpFactory.get(), serviceComponents.get()),
-            context -> new MistralService(httpFactory.get(), serviceComponents.get()),
-            ElasticsearchInternalService::new
-        );
+        return Stream.concat(
+            Stream.of(
+                ElserInternalService::new,
+                context -> new HuggingFaceElserService(httpFactory.get(), serviceComponents.get()),
+                context -> new HuggingFaceService(httpFactory.get(), serviceComponents.get()),
+                context -> new OpenAiService(httpFactory.get(), serviceComponents.get()),
+                context -> new CohereService(httpFactory.get(), serviceComponents.get()),
+                context -> new AzureOpenAiService(httpFactory.get(), serviceComponents.get()),
+                context -> new AzureAiStudioService(httpFactory.get(), serviceComponents.get()),
+                context -> new GoogleAiStudioService(httpFactory.get(), serviceComponents.get()),
+                context -> new MistralService(httpFactory.get(), serviceComponents.get()),
+                ElasticsearchInternalService::new
+            ),
+            DittoSchemas.dittoServices(httpFactory.get(), serviceComponents.get())
+        ).toList();
     }
 
     @Override

@@ -33,11 +33,18 @@ import java.util.Set;
 import static org.elasticsearch.xpack.inference.services.ServiceUtils.removeFromMapOrThrowIfNull;
 
 public class DittoService extends SenderService {
-    private final DittoSchema dittoSchema;
+    private final Map<TaskType, DittoSchema> dittoSchemas;
+    private final String name;
 
-    public DittoService(HttpRequestSender.Factory factory, ServiceComponents serviceComponents, DittoSchema dittoSchema) {
+    public DittoService(
+        HttpRequestSender.Factory factory,
+        ServiceComponents serviceComponents,
+        Map<TaskType, DittoSchema> dittoSchemas,
+        String name
+    ) {
         super(factory, serviceComponents);
-        this.dittoSchema = dittoSchema;
+        this.dittoSchemas = dittoSchemas;
+        this.name = name;
     }
 
     @Override
@@ -49,26 +56,7 @@ public class DittoService extends SenderService {
         TimeValue timeout,
         ActionListener<InferenceServiceResults> listener
     ) {
-        if (model instanceof DittoModel dittoModel) {
-            var tokenLimit = dittoModel.getServiceSettings().tokenLimit();
-            var truncation = tokenLimit != null ? Truncator.truncate(input, tokenLimit) : null;
-            var truncatedInput = truncation != null ? truncation.input() : input;
-            var dittoInput = dittoSchema.parseInput(truncatedInput, truncation, null, taskSettings, inputType);
-            var dittoRequest = new DittoRequest(dittoModel, getServiceComponents().truncator(), dittoInput);
-            var rateLimitingGroup = dittoModel.getServiceSettings().rateLimitGroup();
-            var rateLimitingSettings = dittoModel.getServiceSettings().rateLimitSettings();
-            var responseHandler = dittoSchema.parseResponse();
-            var dittoRequestManager = new DittoRequestManager(
-                getServiceComponents().threadPool(),
-                dittoModel.getInferenceEntityId(),
-                rateLimitingGroup,
-                rateLimitingSettings,
-                dittoRequest,
-                responseHandler
-            );
-            var dittoExecution = new DittoExecutableAction(getSender(), dittoRequestManager, dittoModel);
-            dittoExecution.execute(new DocumentsOnlyInput(input), timeout, listener);
-        }
+        doInfer(model, null, input, taskSettings, inputType, timeout, listener);
     }
 
     @Override
@@ -81,7 +69,33 @@ public class DittoService extends SenderService {
         TimeValue timeout,
         ActionListener<InferenceServiceResults> listener
     ) {
+        if (model instanceof DittoModel dittoModel) {
+            var dittoSchema = dittoSchemas.get(dittoModel.getServiceSettings().taskType());
 
+            // handle rate limiting
+            var rateLimitingGroup = dittoModel.getServiceSettings().rateLimitGroup();
+            var rateLimitingSettings = dittoModel.getServiceSettings().rateLimitSettings();
+
+            // truncate input
+            var tokenLimit = dittoModel.getServiceSettings().tokenLimit();
+            var truncation = tokenLimit != null ? Truncator.truncate(input, tokenLimit) : null;
+            var truncatedInput = truncation != null ? truncation.input() : input;
+
+            // make http request & handle response
+            var dittoInput = dittoSchema.parseInput(truncatedInput, truncation, query, taskSettings, inputType);
+            var dittoRequest = new DittoRequest(dittoModel, getServiceComponents().truncator(), dittoInput);
+            var responseHandler = dittoSchema.parseResponse();
+            var dittoRequestManager = new DittoRequestManager(
+                getServiceComponents().threadPool(),
+                dittoModel.getInferenceEntityId(),
+                rateLimitingGroup,
+                rateLimitingSettings,
+                dittoRequest,
+                responseHandler
+            );
+            var dittoExecution = new DittoExecutableAction(getSender(), dittoRequestManager, dittoModel);
+            dittoExecution.execute(new DocumentsOnlyInput(input), timeout, listener);
+        }
     }
 
     @Override
@@ -100,7 +114,7 @@ public class DittoService extends SenderService {
 
     @Override
     public String name() {
-        return dittoSchema.name();
+        return name;
     }
 
     @Override
@@ -112,6 +126,7 @@ public class DittoService extends SenderService {
         ActionListener<Model> parsedModelListener
     ) {
         ActionListener.completeWith(parsedModelListener, () -> {
+            var dittoSchema = dittoSchemas.get(taskType);
             var serviceSettings = dittoSchema.parseServiceSettings(config);
             var taskSettings = dittoSchema.parseTaskSettings(config);
             var secretSettings = dittoSchema.parseSecretSettings(config);
@@ -130,17 +145,13 @@ public class DittoService extends SenderService {
         var taskSettingsMap = removeFromMapOrThrowIfNull(config, ModelConfigurations.TASK_SETTINGS);
         var serviceSettings = DittoServiceSettings.fromStorage(serviceSettingsMap);
         var taskSettings = DittoTaskSettings.fromStorage(taskSettingsMap);
-        var secretSettings = new DittoSecretSettings(secrets, XContentType.JSON);
-        return new DittoModel(inferenceEntityId, taskType, dittoSchema.name(), serviceSettings, secretSettings, taskSettings);
+        var secretSettings = secrets != null ? new DittoSecretSettings(secrets, XContentType.JSON) : null;
+        return new DittoModel(inferenceEntityId, taskType, name, serviceSettings, secretSettings, taskSettings);
     }
 
     @Override
     public Model parsePersistedConfig(String inferenceEntityId, TaskType taskType, Map<String, Object> config) {
-        var serviceSettingsMap = removeFromMapOrThrowIfNull(config, ModelConfigurations.SERVICE_SETTINGS);
-        var taskSettingsMap = removeFromMapOrThrowIfNull(config, ModelConfigurations.TASK_SETTINGS);
-        var serviceSettings = DittoServiceSettings.fromStorage(serviceSettingsMap);
-        var taskSettings = DittoTaskSettings.fromStorage(taskSettingsMap);
-        return new DittoModel(inferenceEntityId, taskType, dittoSchema.name(), serviceSettings, null, taskSettings);
+        return parsePersistedConfigWithSecrets(inferenceEntityId, taskType, config, null);
     }
 
     @Override

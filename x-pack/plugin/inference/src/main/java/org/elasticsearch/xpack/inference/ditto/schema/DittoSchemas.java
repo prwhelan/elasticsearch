@@ -7,12 +7,36 @@
 
 package org.elasticsearch.xpack.inference.ditto.schema;
 
+import org.elasticsearch.inference.InferenceServiceExtension;
+import org.elasticsearch.inference.TaskType;
+import org.elasticsearch.xpack.inference.ditto.DittoService;
+import org.elasticsearch.xpack.inference.external.http.sender.HttpRequestSender;
+import org.elasticsearch.xpack.inference.services.ServiceComponents;
+
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
 public class DittoSchemas {
-    public static void main(String[] args) {
-        System.out.println("start");
-        var schema = new DittoSchemaLoader().load("cohere-embeddings.yml");
-        System.out.println(schema);
-        System.out.println("end");
+    private static final List<String> schemaFiles = List.of();
+
+    public static Stream<InferenceServiceExtension.Factory> dittoServices(
+        HttpRequestSender.Factory factory,
+        ServiceComponents serviceComponents
+    ) {
+        return groupedSchemas().entrySet()
+            .stream()
+            .map(entry -> new DittoService(factory, serviceComponents, entry.getValue(), entry.getKey()))
+            .map(dittoService -> context -> dittoService);
+    }
+
+    private static Map<String, Map<TaskType, DittoSchema>> groupedSchemas() {
+        var schemaLoader = new DittoSchemaLoader();
+        return schemaFiles.stream()
+            .map(schemaLoader::load)
+            .collect(Collectors.groupingBy(DittoSchema::name, Collectors.toMap(DittoSchema::taskType, Function.identity())));
     }
 
 }

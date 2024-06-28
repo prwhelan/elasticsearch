@@ -10,16 +10,23 @@ package org.elasticsearch.xpack.inference.ditto;
 import org.elasticsearch.TransportVersion;
 import org.elasticsearch.common.settings.SecureString;
 import org.elasticsearch.inference.SecretSettings;
+import org.elasticsearch.xcontent.XContentBuilder;
 import org.elasticsearch.xcontent.XContentType;
 import org.elasticsearch.xpack.inference.services.ServiceUtils;
 import org.elasticsearch.xpack.inference.services.settings.DefaultSecretSettings;
 
+import java.io.IOException;
 import java.util.Map;
 
-public class DittoSecretSettings extends DittoSettingsMap implements SecretSettings {
+import static org.elasticsearch.xpack.inference.services.ServiceUtils.removeAsType;
+import static org.elasticsearch.xpack.inference.services.azureopenai.AzureOpenAiSecretSettings.API_KEY;
 
-    public DittoSecretSettings(Map<String, Object> secretSettings, XContentType contentType) {
-        super(secretSettings, Map.of(), contentType);
+public class DittoSecretSettings extends DittoSettingsMap implements SecretSettings {
+    private final DefaultSecretSettings defaultSecretSettings;
+
+    public DittoSecretSettings(DefaultSecretSettings defaultSecretSettings, XContentType contentType) {
+        super(Map.of(), Map.of(), contentType);
+        this.defaultSecretSettings = defaultSecretSettings;
     }
 
     @Override
@@ -43,6 +50,16 @@ public class DittoSecretSettings extends DittoSettingsMap implements SecretSetti
     }
 
     public SecureString apiKey() {
-        return ServiceUtils.apiKey(DefaultSecretSettings.fromMap(headers()));
+        return ServiceUtils.apiKey(defaultSecretSettings);
+    }
+
+    protected XContentBuilder toXContentFragment(XContentBuilder builder, Params params) throws IOException {
+        return builder.field(API_KEY, apiKey().toString());
+    }
+
+    @SuppressWarnings({ "unchecked" })
+    public static DittoSecretSettings fromStorage(Map<String, Object> storage) {
+        var secretSettings = removeAsType(storage, "secret_settings", Map.class);
+        return new DittoSecretSettings(DefaultSecretSettings.fromMap(secretSettings), XContentType.JSON);
     }
 }

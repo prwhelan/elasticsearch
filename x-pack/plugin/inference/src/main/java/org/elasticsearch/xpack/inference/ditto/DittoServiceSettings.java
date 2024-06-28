@@ -22,7 +22,6 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.elasticsearch.xpack.inference.services.ServiceUtils.removeAsType;
-import static org.elasticsearch.xpack.inference.services.ServiceUtils.removeStringOrThrowIfNull;
 
 public class DittoServiceSettings extends DittoSettingsMap implements ServiceSettings {
     private final Integer tokenLimit;
@@ -110,7 +109,7 @@ public class DittoServiceSettings extends DittoSettingsMap implements ServiceSet
         if (tokenLimit != null) {
             builder.field("tokenLimit", tokenLimit);
         }
-        builder.field("RequestsPerMinute", rateLimitSettings.requestsPerTimeUnit());
+        builder.field("requestsPerMinute", rateLimitSettings.requestsPerTimeUnit());
         builder.field("rateLimitGroup", rateLimitGroup);
         builder.field("taskType", taskType.toString());
         return builder;
@@ -118,10 +117,11 @@ public class DittoServiceSettings extends DittoSettingsMap implements ServiceSet
 
     public static DittoServiceSettings fromStorage(Map<String, Object> storage) {
         var tokenLimit = removeAsType(storage, "tokenLimit", Integer.class);
-        var rateLimitSettings = Optional.ofNullable(removeAsType(storage, "RequestsPerMinute", Long.class))
+        var rateLimitSettings = Optional.ofNullable(removeAsType(storage, "requestsPerMinute", Integer.class))
+            .map(Integer::longValue)
             .map(RateLimitSettings::new)
             .orElseThrow();
-        var rateLimitGroup = Integer.parseInt(removeStringOrThrowIfNull(storage, "rateLimitGroup"));
+        var rateLimitGroup = removeAsType(storage, "rateLimitGroup", Integer.class);
         var taskType = Optional.ofNullable(removeAsType(storage, "taskType", String.class)).map(TaskType::fromString).orElseThrow();
         return new DittoServiceSettings(storage, tokenLimit, rateLimitSettings, rateLimitGroup, taskType);
     }

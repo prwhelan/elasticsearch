@@ -7,13 +7,16 @@
 
 package org.elasticsearch.xpack.inference.ditto.schema;
 
+import org.elasticsearch.core.Tuple;
 import org.elasticsearch.test.ESTestCase;
 import org.hamcrest.Matchers;
 
 public class DittoSchemaTests extends ESTestCase {
     public void testCohereEmbeddings() {
 
-        var schema = new DittoSchemaLoader().load("/org/elasticsearch/xpack/inference/ditto/schema/cohere-embeddings.yml");
+        var schema = new DittoSchemaLoader().load(
+            Tuple.tuple("/org/elasticsearch/xpack/inference/ditto/schema/voyage-embedding.yml", new VoyageResponseHandler())
+        );
         assertThat(schema, Matchers.notNullValue());
         assertThat(schema.name(), Matchers.equalTo("cohere"));
     }

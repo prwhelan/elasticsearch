@@ -18,6 +18,7 @@ import org.elasticsearch.xpack.inference.ditto.DittoServiceSettings;
 import org.elasticsearch.xpack.inference.ditto.DittoTaskSettings;
 import org.elasticsearch.xpack.inference.ditto.ElasticDittoInput;
 import org.elasticsearch.xpack.inference.external.http.retry.ResponseHandler;
+import org.elasticsearch.xpack.inference.services.settings.DefaultSecretSettings;
 import org.elasticsearch.xpack.inference.services.settings.RateLimitSettings;
 
 import java.net.URI;
@@ -44,7 +45,7 @@ public class DittoSchema {
     private final Map<List<String>, DittoSchemaMapping> inferenceRequestBody;
     private final Map<String, String> hardcodedHeaders;
     private final Map<String, String> hardcodedBody;
-    private final Map<List<String>, DittoSchemaMapping> inferenceResponseBody;
+    private final ResponseHandler responseHandler;
 
     DittoSchema(
         String name,
@@ -62,7 +63,7 @@ public class DittoSchema {
         Map<List<String>, DittoSchemaMapping> inferenceRequestBody,
         Map<String, String> hardcodedHeaders,
         Map<String, String> hardcodedBody,
-        Map<List<String>, DittoSchemaMapping> inferenceResponseBody
+        ResponseHandler responseHandler
     ) {
         this.name = name;
         this.type = type;
@@ -79,7 +80,7 @@ public class DittoSchema {
         this.inferenceRequestBody = inferenceRequestBody;
         this.hardcodedHeaders = hardcodedHeaders;
         this.hardcodedBody = hardcodedBody;
-        this.inferenceResponseBody = inferenceResponseBody;
+        this.responseHandler = responseHandler;
     }
 
     public DittoServiceSettings parseServiceSettings(Map<String, Object> config) {
@@ -101,7 +102,7 @@ public class DittoSchema {
             var keyIter = keys.iterator();
             Object value = null;
             var map = config;
-            while (value == null && keyIter.hasNext()) {
+            while (keyIter.hasNext()) {
                 value = map.get(keyIter.next());
                 if (value == null) {
                     if (locationSettings.required()) {
@@ -144,7 +145,7 @@ public class DittoSchema {
     }
 
     public DittoSecretSettings parseSecretSettings(Map<String, Object> config) {
-        return new DittoSecretSettings(parse(secretSettingsHeaders, config), XContentType.JSON);
+        return new DittoSecretSettings(DefaultSecretSettings.fromMap(parse(secretSettingsHeaders, config)), XContentType.JSON);
     }
 
     public DittoInput parseInput(
@@ -190,7 +191,7 @@ public class DittoSchema {
     }
 
     public ResponseHandler parseResponse() {
-        return new DittoResponseHandler(map -> parse(inferenceResponseBody, map));
+        return responseHandler;
     }
 
     public String name() {

@@ -1,0 +1,15 @@
+version: 0.0.0
+_meta:
+  description: Schema for the Voyage Embeddings integration
+service: voyage
+type: text_embedding
+uri: https://api.voyageai.com/v1/embeddings
+requestsPerMinute: 3
+tokenLimit: 320000
+auth:
+  type: api_key
+  location: "{{ service_settings.api_key }}"
+body:
+  model: "{{ service_settings.model_id | voyage-2 }}"
+  input: "{{ inference_request.input }}"
+  input_type: "{{ task_settings.input_type ? }}"

@@ -7,9 +7,11 @@
 
 package org.elasticsearch.xpack.inference.ditto.schema;
 
+import org.elasticsearch.core.Tuple;
 import org.elasticsearch.inference.InferenceServiceExtension;
 import org.elasticsearch.inference.TaskType;
 import org.elasticsearch.xpack.inference.ditto.DittoService;
+import org.elasticsearch.xpack.inference.external.http.retry.ResponseHandler;
 import org.elasticsearch.xpack.inference.external.http.sender.HttpRequestSender;
 import org.elasticsearch.xpack.inference.services.ServiceComponents;
 
@@ -20,7 +22,9 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class DittoSchemas {
-    private static final List<String> schemaFiles = List.of();
+    private static final List<Tuple<String, ResponseHandler>> schemaFiles = List.of(
+        Tuple.tuple("/org/elasticsearch/xpack/inference/ditto/schema/voyage-embedding.yml", new VoyageResponseHandler())
+    );
 
     public static Stream<InferenceServiceExtension.Factory> dittoServices(
         HttpRequestSender.Factory factory,

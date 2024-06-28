@@ -55,12 +55,10 @@ public class DittoRequest implements Request {
 
         ToXContent bodyContent = (builder, params) -> {
             var safeField = safeField(builder);
-            builder.startObject();
             dittoModel.getServiceSettings().body().forEach(safeField);
             dittoInput.taskSettings().body().forEach(safeField);
             override(dittoModel.getTaskSettings().body(), dittoInput.taskSettings().body()).forEach(safeField);
             dittoInput.body().forEach(safeField);
-            builder.endObject();
             return builder;
         };
 

@@ -17,7 +17,6 @@ import org.elasticsearch.inference.InputType;
 import org.elasticsearch.inference.Model;
 import org.elasticsearch.inference.ModelConfigurations;
 import org.elasticsearch.inference.TaskType;
-import org.elasticsearch.xcontent.XContentType;
 import org.elasticsearch.xpack.inference.common.Truncator;
 import org.elasticsearch.xpack.inference.ditto.schema.DittoSchema;
 import org.elasticsearch.xpack.inference.external.http.sender.DittoRequestManager;
@@ -145,7 +144,7 @@ public class DittoService extends SenderService {
         var taskSettingsMap = removeFromMapOrThrowIfNull(config, ModelConfigurations.TASK_SETTINGS);
         var serviceSettings = DittoServiceSettings.fromStorage(serviceSettingsMap);
         var taskSettings = DittoTaskSettings.fromStorage(taskSettingsMap);
-        var secretSettings = secrets != null ? new DittoSecretSettings(secrets, XContentType.JSON) : null;
+        var secretSettings = secrets != null ? DittoSecretSettings.fromStorage(secrets) : null;
         return new DittoModel(inferenceEntityId, taskType, name, serviceSettings, secretSettings, taskSettings);
     }
 

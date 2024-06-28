@@ -34,7 +34,7 @@ abstract class DittoSettingsMap implements ToXContentObject, VersionedNamedWrite
     DittoSettingsMap(Map<String, Object> storageMap) {
         this.headers = (Map<String, Object>) storageMap.get("headers");
         this.body = (Map<String, Object>) storageMap.get("body");
-        this.contentType = (XContentType) storageMap.get("contentType");
+        this.contentType = XContentType.valueOf((String) storageMap.get("contentType"));
     }
 
     public Map<String, Object> headers() {

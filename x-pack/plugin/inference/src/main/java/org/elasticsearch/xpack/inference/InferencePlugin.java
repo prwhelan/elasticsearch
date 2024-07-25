@@ -87,6 +87,7 @@ import org.elasticsearch.xpack.inference.services.mistral.MistralService;
 import org.elasticsearch.xpack.inference.services.openai.OpenAiService;
 import org.elasticsearch.xpack.inference.telemetry.ApmInferenceStats;
 import org.elasticsearch.xpack.inference.telemetry.InferenceStats;
+import org.elasticsearch.xpack.inference.telemetry.index.MlInferenceIndex;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -283,6 +284,7 @@ public class InferencePlugin extends Plugin implements ActionPlugin, ExtensibleP
             RetrySettings.getSettingsDefinitions(),
             Truncator.getSettingsDefinitions(),
             RequestExecutorServiceSettings.getSettingsDefinitions(),
+            MlInferenceIndex.getSettingsDefinitions(),
             List.of(SKIP_VALIDATE_AND_START)
         ).flatMap(Collection::stream).collect(Collectors.toList());
     }

@@ -1,0 +1,25 @@
+{
+  "phases": {
+    "hot": {
+      "actions": {
+        "rollover": {
+          "max_age": "7d",
+          "max_primary_shard_size": "50gb"
+        }
+      }
+    },
+    "delete": {
+      "min_age": "90d",
+      "actions": {
+        "delete": {
+          "delete_searchable_snapshot": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "version": "${xpack.ml.inference.version}",
+    "description": "life cycle policy for ML inference stats indices",
+    "managed": true
+  }
+}

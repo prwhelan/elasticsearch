@@ -1,0 +1,47 @@
+{
+  "index_patterns": ["inference-stats*"],
+  "data_stream": { "hidden":  true },
+  "template": {
+    "settings": {
+      "codec": "best_compression",
+      "index" : {
+        "mode": "time_series",
+        "auto_expand_replicas" : "0-1",
+        "hidden": true
+      },
+      "index.lifecycle.name": "${xpack.inference.policy.name}"
+    },
+    "mappings": {
+      "properties": {
+        "model_id": {
+          "type": "keyword",
+          "time_series_dimension": true
+        },
+        "service": {
+          "type": "keyword",
+          "time_series_dimension": true
+        },
+        "task_type": {
+          "type": "keyword",
+          "time_series_dimension": true
+        },
+        "requests": {
+          "type": "aggregate_metric_double",
+          "metrics": ["sum", "value_count"],
+          "default_metric": "sum"
+        },
+        "@timestamp": {
+          "type": "date",
+          "format": "epoch_millis"
+        }
+      }
+    }
+  },
+  "priority": 210,
+  "version": ${xpack.inference.version},
+  "_meta" : {
+    "version": "${xpack.inference.version}",
+    "description": "index template for ML inference stats indices",
+    "managed": true
+  }
+}

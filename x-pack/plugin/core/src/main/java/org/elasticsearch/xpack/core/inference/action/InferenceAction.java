@@ -42,6 +42,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Flow;
 
 import static org.elasticsearch.core.Strings.format;
 
@@ -323,7 +324,7 @@ public class InferenceAction extends ActionType<InferenceAction.Response> {
         }
     }
 
-    public static class Response extends ActionResponse implements ChunkedToXContentObject {
+    public static class Response extends ActionResponse implements ChunkedToXContentObject, Flow.Publisher<Response> {
 
         private final InferenceServiceResults results;
 
@@ -422,6 +423,31 @@ public class InferenceAction extends ActionType<InferenceAction.Response> {
         @Override
         public int hashCode() {
             return Objects.hash(results);
+        }
+
+        @Override
+        public void subscribe(Flow.Subscriber<? super Response> subscriber) {
+            results.subscribe(new Flow.Subscriber<>() {
+                @Override
+                public void onSubscribe(Flow.Subscription subscription) {
+                    subscriber.onSubscribe(subscription);
+                }
+
+                @Override
+                public void onNext(InferenceServiceResults item) {
+                    subscriber.onNext(new Response(item));
+                }
+
+                @Override
+                public void onError(Throwable throwable) {
+                    subscriber.onError(throwable);
+                }
+
+                @Override
+                public void onComplete() {
+                    subscriber.onComplete();
+                }
+            });
         }
     }
 }

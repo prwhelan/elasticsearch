@@ -14,9 +14,8 @@ import org.elasticsearch.inference.InferenceServiceResults;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.xpack.inference.external.http.retry.RequestSender;
 import org.elasticsearch.xpack.inference.external.http.retry.ResponseHandler;
-import org.elasticsearch.xpack.inference.external.openai.OpenAiChatCompletionResponseHandler;
+import org.elasticsearch.xpack.inference.external.openai.OpenAiChatStreamingCompletionResponseHandler;
 import org.elasticsearch.xpack.inference.external.request.openai.OpenAiChatCompletionRequest;
-import org.elasticsearch.xpack.inference.external.response.openai.OpenAiChatCompletionResponseEntity;
 import org.elasticsearch.xpack.inference.services.openai.completion.OpenAiChatCompletionModel;
 
 import java.util.List;
@@ -50,10 +49,14 @@ public class OpenAiCompletionRequestManager extends OpenAiRequestManager {
         List<String> docsInput = DocumentsOnlyInput.of(inferenceInputs).getInputs();
         OpenAiChatCompletionRequest request = new OpenAiChatCompletionRequest(docsInput, model);
 
-        execute(new ExecutableInferenceRequest(requestSender, logger, request, HANDLER, hasRequestCompletedFunction, listener));
+        execute(
+            new ExecutableInferenceRequest(requestSender, logger, request, createCompletionHandler(), hasRequestCompletedFunction, listener)
+        );
     }
 
+    // create this every time now that we have a variable in there
     private static ResponseHandler createCompletionHandler() {
-        return new OpenAiChatCompletionResponseHandler("openai completion", OpenAiChatCompletionResponseEntity::fromResponse);
+        return new OpenAiChatStreamingCompletionResponseHandler("openai completion");
+        // return new OpenAiChatCompletionResponseHandler("openai completion", OpenAiChatCompletionResponseEntity::fromResponse);
     }
 }

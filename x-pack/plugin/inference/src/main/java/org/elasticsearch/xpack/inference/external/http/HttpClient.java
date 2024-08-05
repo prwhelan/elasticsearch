@@ -7,17 +7,20 @@
 
 package org.elasticsearch.xpack.inference.external.http;
 
+import org.apache.http.HttpHost;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.protocol.HttpClientContext;
 import org.apache.http.concurrent.FutureCallback;
 import org.apache.http.impl.nio.client.CloseableHttpAsyncClient;
 import org.apache.http.impl.nio.client.HttpAsyncClientBuilder;
 import org.apache.http.impl.nio.conn.PoolingNHttpClientConnectionManager;
+import org.apache.http.nio.protocol.BasicAsyncRequestProducer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.xpack.core.common.socket.SocketAccess;
+import org.elasticsearch.xpack.inference.external.http.retry.StreamingResponseHandler;
 import org.elasticsearch.xpack.inference.external.request.HttpRequest;
 import org.elasticsearch.xpack.inference.logging.ThrottlerManager;
 
@@ -126,6 +129,58 @@ public class HttpClient implements Closeable {
                 );
             }
         }));
+    }
+
+    public void stream(HttpRequest request, HttpClientContext context, ActionListener<HttpResult> listener) throws IOException {
+        // The caller must call start() first before attempting to send a request
+        assert status.get() == Status.STARTED : "call start() before attempting to send a request";
+
+        SocketAccess.doPrivileged(
+            () -> client.execute(
+                new BasicAsyncRequestProducer(
+                    HttpHost.create(request.httpRequestBase().getURI().getScheme() + "://" + request.httpRequestBase().getURI().getHost()),
+                    request.httpRequestBase()
+                ),
+                new StreamingResponseHandler(listener),
+                new FutureCallback<>() {
+                    @Override
+                    public void completed(HttpResult response) {
+                        threadPool.executor(UTILITY_THREAD_POOL_NAME).execute(() -> {
+                            try {
+                                listener.onResponse(response);
+                            } catch (Exception e) {
+                                throttlerManager.warn(
+                                    logger,
+                                    format("Failed to create http result from inference entity id [%s]", request.inferenceEntityId()),
+                                    e
+                                );
+                                listener.onFailure(e);
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void failed(Exception ex) {
+                        throttlerManager.warn(
+                            logger,
+                            format("Request from inference entity id [%s] failed", request.inferenceEntityId()),
+                            ex
+                        );
+                        failUsingUtilityThread(ex, listener);
+                    }
+
+                    @Override
+                    public void cancelled() {
+                        failUsingUtilityThread(
+                            new CancellationException(
+                                format("Request from inference entity id [%s] was cancelled", request.inferenceEntityId())
+                            ),
+                            listener
+                        );
+                    }
+                }
+            )
+        );
     }
 
     private void respondUsingUtilityThread(HttpResponse response, HttpRequest request, ActionListener<HttpResult> listener) {

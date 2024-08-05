@@ -13,8 +13,8 @@ import org.elasticsearch.rest.BaseRestHandler;
 import org.elasticsearch.rest.RestRequest;
 import org.elasticsearch.rest.Scope;
 import org.elasticsearch.rest.ServerlessScope;
-import org.elasticsearch.rest.action.RestChunkedToXContentListener;
 import org.elasticsearch.xpack.core.inference.action.InferenceAction;
+import org.elasticsearch.xpack.inference.action.StreamingInferenceResponseSubscriber;
 
 import java.io.IOException;
 import java.util.List;
@@ -59,6 +59,10 @@ public class RestInferenceAction extends BaseRestHandler {
             InferenceAction.Request.DEFAULT_TIMEOUT
         );
         requestBuilder.setInferenceTimeout(inferTimeout);
-        return channel -> client.execute(InferenceAction.INSTANCE, requestBuilder.build(), new RestChunkedToXContentListener<>(channel));
+        return channel -> client.execute(
+            InferenceAction.INSTANCE,
+            requestBuilder.build(),
+            new StreamingInferenceResponseSubscriber(channel)
+        );
     }
 }

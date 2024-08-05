@@ -65,6 +65,8 @@ public class OpenAiChatCompletionRequestEntity implements ToXContentObject {
             builder.field(USER_FIELD, user);
         }
 
+        builder.field("stream", true);
+
         builder.endObject();
 
         return builder;

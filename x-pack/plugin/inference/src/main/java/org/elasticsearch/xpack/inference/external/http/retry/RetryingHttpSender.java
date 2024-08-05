@@ -124,7 +124,7 @@ public class RetryingHttpSender implements RequestSender {
             });
 
             try {
-                httpClient.send(request.createHttpRequest(), context, responseListener);
+                httpClient.stream(request.createHttpRequest(), context, responseListener);
             } catch (Exception e) {
                 logException(logger, request, responseHandler.getRequestType(), e);
 

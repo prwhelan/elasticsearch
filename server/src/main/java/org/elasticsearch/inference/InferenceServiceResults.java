@@ -13,8 +13,9 @@ import org.elasticsearch.common.xcontent.ChunkedToXContent;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Flow;
 
-public interface InferenceServiceResults extends NamedWriteable, ChunkedToXContent {
+public interface InferenceServiceResults extends NamedWriteable, ChunkedToXContent, Flow.Publisher<InferenceServiceResults>  {
 
     /**
      * Transform the result to match the format required for the TransportCoordinatedInferenceAction.
@@ -37,4 +38,16 @@ public interface InferenceServiceResults extends NamedWriteable, ChunkedToXConte
      * Convert the result to a map to aid with test assertions
      */
     Map<String, Object> asMap();
+
+    default boolean isStreaming() {
+        return false;
+    }
+
+    default boolean isFinishedStreaming() {
+        return true;
+    }
+
+    @Override
+    default void subscribe(Flow.Subscriber<? super InferenceServiceResults> subscriber) {
+    }
 }

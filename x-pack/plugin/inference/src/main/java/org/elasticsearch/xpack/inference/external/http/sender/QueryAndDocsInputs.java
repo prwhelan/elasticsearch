@@ -32,8 +32,8 @@ public class QueryAndDocsInputs extends InferenceInputs {
 
     List<String> chunks;
 
-    public QueryAndDocsInputs(String query, List<String> chunks) {
-        super();
+    public QueryAndDocsInputs(String query, List<String> chunks, boolean stream) {
+        super(stream);
         this.query = Objects.requireNonNull(query);
         this.chunks = Objects.requireNonNull(chunks);
     }

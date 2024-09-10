@@ -153,6 +153,7 @@ public class GoogleVertexAiService extends SenderService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         if (model instanceof GoogleVertexAiModel == false) {
@@ -165,7 +166,7 @@ public class GoogleVertexAiService extends SenderService {
         var actionCreator = new GoogleVertexAiActionCreator(getSender(), getServiceComponents());
 
         var action = googleVertexAiModel.accept(actionCreator, taskSettings);
-        action.execute(new DocumentsOnlyInput(input), timeout, listener);
+        action.execute(new DocumentsOnlyInput(input, stream), timeout, listener);
     }
 
     @Override
@@ -176,6 +177,7 @@ public class GoogleVertexAiService extends SenderService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         if (model instanceof GoogleVertexAiModel == false) {
@@ -187,7 +189,7 @@ public class GoogleVertexAiService extends SenderService {
         var actionCreator = new GoogleVertexAiActionCreator(getSender(), getServiceComponents());
 
         var action = googleVertexAiModel.accept(actionCreator, taskSettings);
-        action.execute(new QueryAndDocsInputs(query, input), timeout, listener);
+        action.execute(new QueryAndDocsInputs(query, input, stream), timeout, listener);
     }
 
     @Override
@@ -208,7 +210,7 @@ public class GoogleVertexAiService extends SenderService {
             .batchRequestsWithListeners(listener);
         for (var request : batchedRequests) {
             var action = googleVertexAiModel.accept(actionCreator, taskSettings);
-            action.execute(new DocumentsOnlyInput(request.batch().inputs()), timeout, request.listener());
+            action.execute(new DocumentsOnlyInput(request.batch().inputs(), false), timeout, request.listener());
         }
     }
 

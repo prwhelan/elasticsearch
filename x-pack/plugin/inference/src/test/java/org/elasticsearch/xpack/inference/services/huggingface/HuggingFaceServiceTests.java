@@ -441,6 +441,7 @@ public class HuggingFaceServiceTests extends ESTestCase {
                 new HashMap<>(),
                 InputType.INGEST,
                 InferenceAction.Request.DEFAULT_TIMEOUT,
+                false,
                 listener
             );
 
@@ -484,6 +485,7 @@ public class HuggingFaceServiceTests extends ESTestCase {
                 new HashMap<>(),
                 InputType.INGEST,
                 InferenceAction.Request.DEFAULT_TIMEOUT,
+                false,
                 listener
             );
 

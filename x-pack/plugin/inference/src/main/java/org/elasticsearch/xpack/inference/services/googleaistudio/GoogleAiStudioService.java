@@ -219,6 +219,7 @@ public class GoogleAiStudioService extends SenderService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         if (model instanceof GoogleAiStudioModel == false) {
@@ -230,7 +231,7 @@ public class GoogleAiStudioService extends SenderService {
         var actionCreator = new GoogleAiStudioActionCreator(getSender(), getServiceComponents());
 
         var action = googleAiStudioModel.accept(actionCreator, taskSettings, inputType);
-        action.execute(new DocumentsOnlyInput(input), timeout, listener);
+        action.execute(new DocumentsOnlyInput(input, stream), timeout, listener);
     }
 
     @Override
@@ -241,6 +242,7 @@ public class GoogleAiStudioService extends SenderService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         throw new UnsupportedOperationException("Query input not supported for Google AI Studio");
@@ -264,7 +266,7 @@ public class GoogleAiStudioService extends SenderService {
             .batchRequestsWithListeners(listener);
         for (var request : batchedRequests) {
             var action = googleAiStudioModel.accept(actionCreator, taskSettings, inputType);
-            action.execute(new DocumentsOnlyInput(request.batch().inputs()), timeout, request.listener());
+            action.execute(new DocumentsOnlyInput(request.batch().inputs(), false), timeout, request.listener());
         }
     }
 }

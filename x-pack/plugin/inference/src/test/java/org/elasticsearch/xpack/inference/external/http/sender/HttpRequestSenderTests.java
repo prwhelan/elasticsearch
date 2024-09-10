@@ -107,7 +107,7 @@ public class HttpRequestSenderTests extends ESTestCase {
             PlainActionFuture<InferenceServiceResults> listener = new PlainActionFuture<>();
             sender.send(
                 OpenAiEmbeddingsRequestManagerTests.makeCreator(getUrl(webServer), null, "key", "model", null, threadPool),
-                new DocumentsOnlyInput(List.of("abc")),
+                new DocumentsOnlyInput(List.of("abc"), false),
                 null,
                 listener
             );
@@ -139,7 +139,7 @@ public class HttpRequestSenderTests extends ESTestCase {
             PlainActionFuture<InferenceServiceResults> listener = new PlainActionFuture<>();
             var thrownException = expectThrows(
                 AssertionError.class,
-                () -> sender.send(RequestManagerTests.createMock(), new DocumentsOnlyInput(List.of()), null, listener)
+                () -> sender.send(RequestManagerTests.createMock(), new DocumentsOnlyInput(List.of(), false), null, listener)
             );
             assertThat(thrownException.getMessage(), is("call start() before sending a request"));
         }
@@ -160,7 +160,7 @@ public class HttpRequestSenderTests extends ESTestCase {
             sender.start();
 
             PlainActionFuture<InferenceServiceResults> listener = new PlainActionFuture<>();
-            sender.send(RequestManagerTests.createMock(), new DocumentsOnlyInput(List.of()), TimeValue.timeValueNanos(1), listener);
+            sender.send(RequestManagerTests.createMock(), new DocumentsOnlyInput(List.of(), false), TimeValue.timeValueNanos(1), listener);
 
             var thrownException = expectThrows(ElasticsearchTimeoutException.class, () -> listener.actionGet(TIMEOUT));
 
@@ -185,7 +185,7 @@ public class HttpRequestSenderTests extends ESTestCase {
             sender.start();
 
             PlainActionFuture<InferenceServiceResults> listener = new PlainActionFuture<>();
-            sender.send(RequestManagerTests.createMock(), new DocumentsOnlyInput(List.of()), TimeValue.timeValueNanos(1), listener);
+            sender.send(RequestManagerTests.createMock(), new DocumentsOnlyInput(List.of(), false), TimeValue.timeValueNanos(1), listener);
 
             var thrownException = expectThrows(ElasticsearchTimeoutException.class, () -> listener.actionGet(TIMEOUT));
 

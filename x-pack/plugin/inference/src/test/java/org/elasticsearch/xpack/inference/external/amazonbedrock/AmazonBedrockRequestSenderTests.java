@@ -82,7 +82,7 @@ public class AmazonBedrockRequestSenderTests extends ESTestCase {
                 threadPool,
                 new TimeValue(30, TimeUnit.SECONDS)
             );
-            sender.send(requestManager, new DocumentsOnlyInput(List.of("abc")), null, listener);
+            sender.send(requestManager, new DocumentsOnlyInput(List.of("abc"), false), null, listener);
 
             var result = listener.actionGet(TIMEOUT);
             assertThat(result.asMap(), is(buildExpectationFloat(List.of(new float[] { 0.123F, 0.456F, 0.678F, 0.789F }))));
@@ -107,7 +107,7 @@ public class AmazonBedrockRequestSenderTests extends ESTestCase {
 
             PlainActionFuture<InferenceServiceResults> listener = new PlainActionFuture<>();
             var requestManager = new AmazonBedrockChatCompletionRequestManager(model, threadPool, new TimeValue(30, TimeUnit.SECONDS));
-            sender.send(requestManager, new DocumentsOnlyInput(List.of("abc")), null, listener);
+            sender.send(requestManager, new DocumentsOnlyInput(List.of("abc"), false), null, listener);
 
             var result = listener.actionGet(TIMEOUT);
             assertThat(result.asMap(), is(buildExpectationCompletion(List.of("test response text"))));

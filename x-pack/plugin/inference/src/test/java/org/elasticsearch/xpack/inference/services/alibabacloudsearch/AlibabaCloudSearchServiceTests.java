@@ -101,6 +101,7 @@ public class AlibabaCloudSearchServiceTests extends ESTestCase {
                 Map<String, Object> taskSettings,
                 InputType inputType,
                 TimeValue timeout,
+                boolean stream,
                 ActionListener<InferenceServiceResults> listener
             ) {
                 InferenceTextEmbeddingFloatResults results = new InferenceTextEmbeddingFloatResults(

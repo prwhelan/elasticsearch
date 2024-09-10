@@ -405,6 +405,7 @@ public class MistralServiceTests extends ESTestCase {
                 new HashMap<>(),
                 InputType.INGEST,
                 InferenceAction.Request.DEFAULT_TIMEOUT,
+                false,
                 listener
             );
 
@@ -520,6 +521,7 @@ public class MistralServiceTests extends ESTestCase {
                     new HashMap<>(),
                     InputType.INGEST,
                     InferenceAction.Request.DEFAULT_TIMEOUT,
+                    false,
                     listener
                 )
             );
@@ -556,6 +558,7 @@ public class MistralServiceTests extends ESTestCase {
                 new HashMap<>(),
                 InputType.INGEST,
                 InferenceAction.Request.DEFAULT_TIMEOUT,
+                false,
                 listener
             );
 

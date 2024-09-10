@@ -51,13 +51,14 @@ public abstract class SenderService implements InferenceService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         init();
         if (query != null) {
-            doInfer(model, query, input, taskSettings, inputType, timeout, listener);
+            doInfer(model, query, input, taskSettings, inputType, timeout, stream, listener);
         } else {
-            doInfer(model, input, taskSettings, inputType, timeout, listener);
+            doInfer(model, input, taskSettings, inputType, timeout, stream, listener);
         }
     }
 
@@ -95,6 +96,7 @@ public abstract class SenderService implements InferenceService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     );
 
@@ -105,6 +107,7 @@ public abstract class SenderService implements InferenceService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     );
 

@@ -326,6 +326,7 @@ public class ElasticsearchInternalService extends BaseElasticsearchInternalServi
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         var taskType = model.getConfigurations().getTaskType();

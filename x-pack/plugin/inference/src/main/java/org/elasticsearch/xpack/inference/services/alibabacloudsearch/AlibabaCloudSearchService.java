@@ -197,6 +197,7 @@ public class AlibabaCloudSearchService extends SenderService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         if (model instanceof AlibabaCloudSearchModel == false) {
@@ -208,7 +209,7 @@ public class AlibabaCloudSearchService extends SenderService {
         var actionCreator = new AlibabaCloudSearchActionCreator(getSender(), getServiceComponents());
 
         var action = alibabaCloudSearchModel.accept(actionCreator, taskSettings, inputType);
-        action.execute(new QueryAndDocsInputs(query, input), timeout, listener);
+        action.execute(new QueryAndDocsInputs(query, input, stream), timeout, listener);
     }
 
     @Override
@@ -218,6 +219,7 @@ public class AlibabaCloudSearchService extends SenderService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         if (model instanceof AlibabaCloudSearchModel == false) {
@@ -229,7 +231,7 @@ public class AlibabaCloudSearchService extends SenderService {
         var actionCreator = new AlibabaCloudSearchActionCreator(getSender(), getServiceComponents());
 
         var action = alibabaCloudSearchModel.accept(actionCreator, taskSettings, inputType);
-        action.execute(new DocumentsOnlyInput(input), timeout, listener);
+        action.execute(new DocumentsOnlyInput(input, stream), timeout, listener);
     }
 
     @Override
@@ -307,6 +309,7 @@ public class AlibabaCloudSearchService extends SenderService {
             Map.of(),
             InputType.INGEST,
             DEFAULT_TIMEOUT,
+            false,
             listener.delegateFailureAndWrap((delegate, r) -> {
                 listener.onResponse(model);
             })

@@ -506,6 +506,7 @@ public class GoogleAiStudioServiceTests extends ESTestCase {
                 new HashMap<>(),
                 InputType.INGEST,
                 InferenceAction.Request.DEFAULT_TIMEOUT,
+                false,
                 listener
             );
 
@@ -581,6 +582,7 @@ public class GoogleAiStudioServiceTests extends ESTestCase {
                 new HashMap<>(),
                 InputType.INGEST,
                 InferenceAction.Request.DEFAULT_TIMEOUT,
+                false,
                 listener
             );
             var result = listener.actionGet(TIMEOUT);
@@ -637,6 +639,7 @@ public class GoogleAiStudioServiceTests extends ESTestCase {
                 new HashMap<>(),
                 InputType.INGEST,
                 InferenceAction.Request.DEFAULT_TIMEOUT,
+                false,
                 listener
             );
             var result = listener.actionGet(TIMEOUT);
@@ -777,6 +780,7 @@ public class GoogleAiStudioServiceTests extends ESTestCase {
                 new HashMap<>(),
                 InputType.INGEST,
                 InferenceAction.Request.DEFAULT_TIMEOUT,
+                false,
                 listener
             );
 

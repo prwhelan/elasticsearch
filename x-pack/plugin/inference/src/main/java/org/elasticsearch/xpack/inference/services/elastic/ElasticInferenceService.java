@@ -67,6 +67,7 @@ public class ElasticInferenceService extends SenderService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         if (model instanceof ElasticInferenceServiceModel == false) {
@@ -78,7 +79,7 @@ public class ElasticInferenceService extends SenderService {
         var actionCreator = new ElasticInferenceServiceActionCreator(getSender(), getServiceComponents());
 
         var action = elasticInferenceServiceModel.accept(actionCreator, taskSettings);
-        action.execute(new DocumentsOnlyInput(input), timeout, listener);
+        action.execute(new DocumentsOnlyInput(input, stream), timeout, listener);
     }
 
     @Override
@@ -89,6 +90,7 @@ public class ElasticInferenceService extends SenderService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         throw new UnsupportedOperationException("Query input not supported for Elastic Inference Service");
@@ -110,7 +112,7 @@ public class ElasticInferenceService extends SenderService {
             (delegate, response) -> delegate.onResponse(translateToChunkedResults(input, response))
         );
 
-        doInfer(model, input, taskSettings, inputType, timeout, inferListener);
+        doInfer(model, input, taskSettings, inputType, timeout, false, inferListener);
     }
 
     @Override

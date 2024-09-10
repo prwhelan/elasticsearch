@@ -193,6 +193,7 @@ public class CohereService extends SenderService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         if (model instanceof CohereModel == false) {
@@ -204,7 +205,7 @@ public class CohereService extends SenderService {
         var actionCreator = new CohereActionCreator(getSender(), getServiceComponents());
 
         var action = cohereModel.accept(actionCreator, taskSettings, inputType);
-        action.execute(new QueryAndDocsInputs(query, input), timeout, listener);
+        action.execute(new QueryAndDocsInputs(query, input, stream), timeout, listener);
     }
 
     @Override
@@ -214,6 +215,7 @@ public class CohereService extends SenderService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         if (model instanceof CohereModel == false) {
@@ -225,7 +227,7 @@ public class CohereService extends SenderService {
         var actionCreator = new CohereActionCreator(getSender(), getServiceComponents());
 
         var action = cohereModel.accept(actionCreator, taskSettings, inputType);
-        action.execute(new DocumentsOnlyInput(input), timeout, listener);
+        action.execute(new DocumentsOnlyInput(input, stream), timeout, listener);
     }
 
     @Override
@@ -254,7 +256,7 @@ public class CohereService extends SenderService {
         ).batchRequestsWithListeners(listener);
         for (var request : batchedRequests) {
             var action = cohereModel.accept(actionCreator, taskSettings, inputType);
-            action.execute(new DocumentsOnlyInput(request.batch().inputs()), timeout, request.listener());
+            action.execute(new DocumentsOnlyInput(request.batch().inputs(), false), timeout, request.listener());
         }
     }
 

@@ -75,12 +75,13 @@ public class AmazonBedrockService extends SenderService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         var actionCreator = new AmazonBedrockActionCreator(amazonBedrockSender, this.getServiceComponents(), timeout);
         if (model instanceof AmazonBedrockModel baseAmazonBedrockModel) {
             var action = baseAmazonBedrockModel.accept(actionCreator, taskSettings);
-            action.execute(new DocumentsOnlyInput(input), timeout, listener);
+            action.execute(new DocumentsOnlyInput(input, stream), timeout, listener);
         } else {
             listener.onFailure(createInvalidModelException(model));
         }
@@ -94,6 +95,7 @@ public class AmazonBedrockService extends SenderService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         throw new UnsupportedOperationException("Amazon Bedrock service does not support inference with query input");
@@ -117,7 +119,7 @@ public class AmazonBedrockService extends SenderService {
                 .batchRequestsWithListeners(listener);
             for (var request : batchedRequests) {
                 var action = baseAmazonBedrockModel.accept(actionCreator, taskSettings);
-                action.execute(new DocumentsOnlyInput(request.batch().inputs()), timeout, request.listener());
+                action.execute(new DocumentsOnlyInput(request.batch().inputs(), false), timeout, request.listener());
             }
         } else {
             listener.onFailure(createInvalidModelException(model));

@@ -152,6 +152,7 @@ public class ElserInternalService extends BaseElasticsearchInternalService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         // No task settings to override with requestTaskSettings

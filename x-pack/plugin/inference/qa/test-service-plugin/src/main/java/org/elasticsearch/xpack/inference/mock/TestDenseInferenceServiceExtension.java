@@ -97,6 +97,7 @@ public class TestDenseInferenceServiceExtension implements InferenceServiceExten
             Map<String, Object> taskSettings,
             InputType inputType,
             TimeValue timeout,
+            boolean stream,
             ActionListener<InferenceServiceResults> listener
         ) {
             switch (model.getConfigurations().getTaskType()) {

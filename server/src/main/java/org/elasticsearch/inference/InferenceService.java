@@ -87,6 +87,7 @@ public interface InferenceService extends Closeable {
      * @param taskSettings Settings in the request to override the model's defaults
      * @param inputType    For search, ingest etc
      * @param timeout      The timeout for the request
+     * @param stream       If the results should be streamed
      * @param listener     Inference result listener
      */
     void infer(
@@ -96,6 +97,7 @@ public interface InferenceService extends Closeable {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     );
 

@@ -648,6 +648,7 @@ public final class ServiceUtils {
             Map.of(),
             InputType.INGEST,
             InferenceAction.Request.DEFAULT_TIMEOUT,
+            false,
             listener.delegateFailureAndWrap((delegate, r) -> {
                 if (r instanceof TextEmbedding embeddingResults) {
                     try {

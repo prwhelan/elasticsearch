@@ -828,6 +828,7 @@ public class AzureAiStudioServiceTests extends ESTestCase {
                 new HashMap<>(),
                 InputType.INGEST,
                 InferenceAction.Request.DEFAULT_TIMEOUT,
+                false,
                 listener
             );
 
@@ -958,6 +959,7 @@ public class AzureAiStudioServiceTests extends ESTestCase {
                     new HashMap<>(),
                     InputType.INGEST,
                     InferenceAction.Request.DEFAULT_TIMEOUT,
+                    false,
                     listener
                 )
             );
@@ -988,6 +990,7 @@ public class AzureAiStudioServiceTests extends ESTestCase {
                 new HashMap<>(),
                 InputType.INGEST,
                 InferenceAction.Request.DEFAULT_TIMEOUT,
+                false,
                 listener
             );
 
@@ -1038,6 +1041,7 @@ public class AzureAiStudioServiceTests extends ESTestCase {
                 new HashMap<>(),
                 InputType.INGEST,
                 InferenceAction.Request.DEFAULT_TIMEOUT,
+                false,
                 listener
             );
 

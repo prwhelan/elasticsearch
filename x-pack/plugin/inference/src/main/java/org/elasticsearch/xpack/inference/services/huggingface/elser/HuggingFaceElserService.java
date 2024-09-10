@@ -81,7 +81,7 @@ public class HuggingFaceElserService extends HuggingFaceBaseService {
         );
 
         // TODO chunking sparse embeddings not implemented
-        doInfer(model, input, taskSettings, inputType, timeout, inferListener);
+        doInfer(model, input, taskSettings, inputType, timeout, false, inferListener);
     }
 
     private static List<ChunkedInferenceServiceResults> translateToChunkedResults(

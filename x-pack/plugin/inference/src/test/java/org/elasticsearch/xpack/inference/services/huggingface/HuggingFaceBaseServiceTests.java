@@ -72,6 +72,7 @@ public class HuggingFaceBaseServiceTests extends ESTestCase {
                 new HashMap<>(),
                 InputType.INGEST,
                 InferenceAction.Request.DEFAULT_TIMEOUT,
+                false,
                 listener
             );
 

@@ -674,6 +674,7 @@ public class AmazonBedrockServiceTests extends ESTestCase {
                 new HashMap<>(),
                 InputType.INGEST,
                 InferenceAction.Request.DEFAULT_TIMEOUT,
+                false,
                 listener
             );
 
@@ -724,6 +725,7 @@ public class AmazonBedrockServiceTests extends ESTestCase {
                     new HashMap<>(),
                     InputType.INGEST,
                     InferenceAction.Request.DEFAULT_TIMEOUT,
+                    false,
                     listener
                 );
 
@@ -765,6 +767,7 @@ public class AmazonBedrockServiceTests extends ESTestCase {
                     new HashMap<>(),
                     InputType.INGEST,
                     InferenceAction.Request.DEFAULT_TIMEOUT,
+                    false,
                     listener
                 );
 
@@ -1028,6 +1031,7 @@ public class AmazonBedrockServiceTests extends ESTestCase {
                 new HashMap<>(),
                 InputType.INGEST,
                 InferenceAction.Request.DEFAULT_TIMEOUT,
+                false,
                 listener
             );
 

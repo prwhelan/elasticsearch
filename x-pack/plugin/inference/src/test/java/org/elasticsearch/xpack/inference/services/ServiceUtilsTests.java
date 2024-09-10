@@ -806,7 +806,7 @@ public class ServiceUtilsTests extends ESTestCase {
             listener.onResponse(new InferenceTextEmbeddingFloatResults(List.of()));
 
             return Void.TYPE;
-        }).when(service).infer(any(), any(), any(), any(), any(), any(), any());
+        }).when(service).infer(any(), any(), any(), any(), any(), any(), false, any());
 
         PlainActionFuture<Integer> listener = new PlainActionFuture<>();
         getEmbeddingSize(model, service, listener);
@@ -829,7 +829,7 @@ public class ServiceUtilsTests extends ESTestCase {
             listener.onResponse(new InferenceTextEmbeddingByteResults(List.of()));
 
             return Void.TYPE;
-        }).when(service).infer(any(), any(), any(), any(), any(), any(), any());
+        }).when(service).infer(any(), any(), any(), any(), any(), any(), false, any());
 
         PlainActionFuture<Integer> listener = new PlainActionFuture<>();
         getEmbeddingSize(model, service, listener);
@@ -854,7 +854,7 @@ public class ServiceUtilsTests extends ESTestCase {
             listener.onResponse(textEmbedding);
 
             return Void.TYPE;
-        }).when(service).infer(any(), any(), any(), any(), any(), any(), any());
+        }).when(service).infer(any(), any(), any(), any(), any(), any(), false, any());
 
         PlainActionFuture<Integer> listener = new PlainActionFuture<>();
         getEmbeddingSize(model, service, listener);
@@ -878,7 +878,7 @@ public class ServiceUtilsTests extends ESTestCase {
             listener.onResponse(textEmbedding);
 
             return Void.TYPE;
-        }).when(service).infer(any(), any(), any(), any(), any(), any(), any());
+        }).when(service).infer(any(), any(), any(), any(), any(), any(), false, any());
 
         PlainActionFuture<Integer> listener = new PlainActionFuture<>();
         getEmbeddingSize(model, service, listener);

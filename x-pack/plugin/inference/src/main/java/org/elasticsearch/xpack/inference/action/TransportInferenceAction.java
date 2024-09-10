@@ -108,6 +108,7 @@ public class TransportInferenceAction extends HandledTransportAction<InferenceAc
             request.getTaskSettings(),
             request.getInputType(),
             request.getInferenceTimeout(),
+            false,
             createListener(request, listener)
         );
     }

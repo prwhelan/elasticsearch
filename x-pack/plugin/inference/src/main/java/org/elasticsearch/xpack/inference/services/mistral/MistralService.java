@@ -58,13 +58,14 @@ public class MistralService extends SenderService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         var actionCreator = new MistralActionCreator(getSender(), getServiceComponents());
 
         if (model instanceof MistralEmbeddingsModel mistralEmbeddingsModel) {
             var action = mistralEmbeddingsModel.accept(actionCreator, taskSettings);
-            action.execute(new DocumentsOnlyInput(input), timeout, listener);
+            action.execute(new DocumentsOnlyInput(input, stream), timeout, listener);
         } else {
             listener.onFailure(createInvalidModelException(model));
         }
@@ -78,6 +79,7 @@ public class MistralService extends SenderService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         throw new UnsupportedOperationException("Mistral service does not support inference with query input");
@@ -105,7 +107,7 @@ public class MistralService extends SenderService {
 
             for (var request : batchedRequests) {
                 var action = mistralEmbeddingsModel.accept(actionCreator, taskSettings);
-                action.execute(new DocumentsOnlyInput(request.batch().inputs()), timeout, request.listener());
+                action.execute(new DocumentsOnlyInput(request.batch().inputs(), false), timeout, request.listener());
             }
         } else {
             listener.onFailure(createInvalidModelException(model));

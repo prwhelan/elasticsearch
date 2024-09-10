@@ -88,6 +88,7 @@ public class TestRerankingServiceExtension implements InferenceServiceExtension 
             Map<String, Object> taskSettings,
             InputType inputType,
             TimeValue timeout,
+            boolean stream,
             ActionListener<InferenceServiceResults> listener
         ) {
             switch (model.getConfigurations().getTaskType()) {

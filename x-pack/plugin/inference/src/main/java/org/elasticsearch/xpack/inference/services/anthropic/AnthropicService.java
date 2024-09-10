@@ -169,6 +169,7 @@ public class AnthropicService extends SenderService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         if (model instanceof AnthropicModel == false) {
@@ -180,7 +181,7 @@ public class AnthropicService extends SenderService {
         var actionCreator = new AnthropicActionCreator(getSender(), getServiceComponents());
 
         var action = anthropicModel.accept(actionCreator, taskSettings);
-        action.execute(new DocumentsOnlyInput(input), timeout, listener);
+        action.execute(new DocumentsOnlyInput(input, stream), timeout, listener);
     }
 
     @Override
@@ -191,6 +192,7 @@ public class AnthropicService extends SenderService {
         Map<String, Object> taskSettings,
         InputType inputType,
         TimeValue timeout,
+        boolean stream,
         ActionListener<InferenceServiceResults> listener
     ) {
         throw new UnsupportedOperationException("Anthropic service does not support inference with query input");

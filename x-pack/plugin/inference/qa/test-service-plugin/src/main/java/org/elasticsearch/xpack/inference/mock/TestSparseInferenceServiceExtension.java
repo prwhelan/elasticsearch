@@ -91,6 +91,7 @@ public class TestSparseInferenceServiceExtension implements InferenceServiceExte
             Map<String, Object> taskSettings,
             InputType inputType,
             TimeValue timeout,
+            boolean stream,
             ActionListener<InferenceServiceResults> listener
         ) {
             switch (model.getConfigurations().getTaskType()) {

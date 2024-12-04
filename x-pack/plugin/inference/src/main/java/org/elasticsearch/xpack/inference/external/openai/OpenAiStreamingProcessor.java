@@ -26,6 +26,7 @@ import java.util.Collections;
 import java.util.Deque;
 import java.util.Iterator;
 import java.util.Objects;
+import java.util.concurrent.LinkedBlockingDeque;
 import java.util.function.Predicate;
 
 import static org.elasticsearch.common.xcontent.XContentParserUtils.ensureExpectedToken;
@@ -112,6 +113,17 @@ public class OpenAiStreamingProcessor extends DelegatingProcessor<Deque<ServerSe
     private static final String CONTENT_FIELD = "content";
     private static final String DONE_MESSAGE = "[done]";
 
+    private final Deque<StreamingChatCompletionResults.Result> buffer = new LinkedBlockingDeque<>();
+
+    @Override
+    protected void onRequest(long n) {
+        if (buffer.isEmpty()) {
+            super.onRequest(n);
+        } else {
+            downstream().onNext(new StreamingChatCompletionResults.Results(singleItem(buffer.poll())));
+        }
+    }
+
     @Override
     protected void next(Deque<ServerSentEvent> item) throws Exception {
         var parserConfig = XContentParserConfiguration.EMPTY.withDeprecationHandler(LoggingDeprecationHandler.INSTANCE);
@@ -131,8 +143,15 @@ public class OpenAiStreamingProcessor extends DelegatingProcessor<Deque<ServerSe
 
         if (results.isEmpty()) {
             upstream().request(1);
-        } else {
+        } else if (results.size() == 1) {
             downstream().onNext(new StreamingChatCompletionResults.Results(results));
+        } else {
+            // results > 1, but openai spec only wants 1 chunk per SSE event
+            var firstItem = singleItem(results.poll());
+            while (results.isEmpty() == false) {
+                buffer.offer(results.poll());
+            }
+            downstream().onNext(new StreamingChatCompletionResults.Results(firstItem));
         }
     }
 
@@ -187,5 +206,11 @@ public class OpenAiStreamingProcessor extends DelegatingProcessor<Deque<ServerSe
                 .map(StreamingChatCompletionResults.Result::new)
                 .iterator();
         }
+    }
+
+    private Deque<StreamingChatCompletionResults.Result> singleItem(StreamingChatCompletionResults.Result result) {
+        var deque = new ArrayDeque<StreamingChatCompletionResults.Result>(2);
+        deque.offer(result);
+        return deque;
     }
 }

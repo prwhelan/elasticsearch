@@ -115,7 +115,8 @@ public class TransportGetCheckpointAction extends HandledTransportAction<Request
             crossProjectModeDecider.resolvesCrossProject(request)
                 ? indicesOptionsForCrossProjectFanout(request.indicesOptions())
                 : request.indicesOptions(),
-            request.indices()
+            request.indices(),
+            false
         );
 
         // this can really only happen if there are remote-only requests and the requested remote clusters/projects do not exist

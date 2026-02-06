@@ -24,6 +24,7 @@ import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
+import org.elasticsearch.core.Strings;
 import org.elasticsearch.discovery.MasterNotDiscoveredException;
 import org.elasticsearch.injection.guice.Inject;
 import org.elasticsearch.persistent.PersistentTasksCustomMetadata;
@@ -55,6 +56,7 @@ import org.elasticsearch.xpack.transform.transforms.FunctionFactory;
 import org.elasticsearch.xpack.transform.transforms.TransformTask;
 
 import java.util.List;
+import java.util.Objects;
 
 import static org.elasticsearch.core.Strings.format;
 import static org.elasticsearch.xpack.transform.utils.SecondaryAuthorizationUtils.getSecurityHeadersPreferringSecondary;
@@ -167,6 +169,8 @@ public class TransportUpdateTransformAction extends TransportTasksAction<Transfo
                         auditor.info(updatedConfig.getId(), "Updated transform.");
                         logger.info("[{}] Updated transform [{}]", updatedConfig.getId(), updateResult.getStatus());
 
+                        auditProjectRoutingChanges(originalConfig, updatedConfig);
+
                         checkTransformConfigAndLogWarnings(updatedConfig);
 
                         boolean updateChangesSettings = update.changesSettings(originalConfig);
@@ -237,6 +241,32 @@ public class TransportUpdateTransformAction extends TransportTasksAction<Transfo
                 listener::onFailure
             )
         );
+    }
+
+    private void auditProjectRoutingChanges(TransformConfig originalConfig, TransformConfig updatedConfig) {
+        if (Objects.equals(originalConfig.getSource().getProjectRouting(), updatedConfig.getSource().getProjectRouting()) == false) {
+            var originalProjectRouting = originalConfig.getSource().getProjectRouting();
+            var updatedProjectRouting = updatedConfig.getSource().getProjectRouting();
+
+            if (originalProjectRouting == null) {
+                auditor.info(updatedConfig.getId(), Strings.format("project_routing has been set to [%s].", updatedProjectRouting));
+                logger.info("[{}] project_routing has been set to [{}]", updatedConfig.getId(), updatedProjectRouting);
+            } else if (updatedProjectRouting == null) {
+                auditor.info(updatedConfig.getId(), Strings.format("project_routing [%s] has been removed.", originalProjectRouting));
+                logger.info("[{}] project_routing [{}] has been removed", updatedConfig.getId(), originalProjectRouting);
+            } else {
+                auditor.info(
+                    updatedConfig.getId(),
+                    Strings.format("project_routing updated from [%s] to [%s].", originalProjectRouting, updatedProjectRouting)
+                );
+                logger.info(
+                    "[{}] project_routing updated from [{}] to [{}]",
+                    updatedConfig.getId(),
+                    originalProjectRouting,
+                    updatedProjectRouting
+                );
+            }
+        }
     }
 
     private void checkTransformConfigAndLogWarnings(TransformConfig config) {

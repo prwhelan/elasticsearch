@@ -13,6 +13,7 @@ import org.elasticsearch.action.ActionListenerResponseHandler;
 import org.elasticsearch.action.IndicesRequest;
 import org.elasticsearch.action.NoShardAvailableActionException;
 import org.elasticsearch.action.OriginalIndices;
+import org.elasticsearch.action.ResolvedIndexExpression;
 import org.elasticsearch.action.ResolvedIndexExpressions;
 import org.elasticsearch.action.UnavailableShardsException;
 import org.elasticsearch.action.search.SearchRequest;
@@ -56,6 +57,7 @@ import org.elasticsearch.xpack.core.transform.action.GetCheckpointAction;
 import org.elasticsearch.xpack.core.transform.action.GetCheckpointAction.Request;
 import org.elasticsearch.xpack.core.transform.action.GetCheckpointAction.Response;
 import org.elasticsearch.xpack.core.transform.action.GetCheckpointNodeAction;
+import org.elasticsearch.xpack.core.transform.transforms.TransformConfig;
 import org.elasticsearch.xpack.transform.TransformServices;
 import org.elasticsearch.xpack.transform.checkpoint.CheckpointException;
 
@@ -164,35 +166,22 @@ public class TransportGetCheckpointAction extends HandledTransportAction<Request
         }
 
         if (localIndices != null) {
-            // note: when security is turned on, the indices are already resolved
-            // TODO: do a quick check and only resolve if necessary??
-            var concreteIndices = this.indexNameExpressionResolver.concreteIndexNames(clusterState, new IndicesRequest() {
-                @Override
-                public String[] indices() {
-                    return localIndices.indices();
-                }
-
-                @Override
-                public IndicesOptions indicesOptions() {
-                    return localIndices.indicesOptions();
-                }
-            });
-            var localRequest = request.rewriteRequest(
-                concreteIndices,
-                localIndices.indicesOptions(),
-                RemoteClusterAware.LOCAL_CLUSTER_GROUP_KEY,
-                includeResolvedIndexExpressions
-            );
-            resolveIndicesAndGetCheckpoint(
+            resolveLocalCheckpoints(
                 task,
-                localRequest,
+                request,
                 clusterState,
+                localIndices,
+                includeResolvedIndexExpressions,
                 responsesByClusterListener.map(response -> Tuple.tuple(RemoteClusterAware.LOCAL_CLUSTER_GROUP_KEY, response))
             );
         }
 
         var threadContext = client.threadPool().getThreadContext();
         var headers = request.headers();
+
+        var nodeId = clusterState.nodes().getLocalNode().getId();
+        var parentTaskId = new TaskId(nodeId, task.getId());
+
         remoteClusterIndices.forEach((cluster, remoteIndices) -> {
             var remoteRequest = request.rewriteRequest(
                 remoteIndices.indices(),
@@ -200,6 +189,7 @@ public class TransportGetCheckpointAction extends HandledTransportAction<Request
                 cluster,
                 includeResolvedIndexExpressions
             );
+            remoteRequest.setParentTask(parentTaskId);
             var remoteClusterClient = remoteClusterService.getRemoteClusterClient(
                 cluster,
                 EsExecutors.DIRECT_EXECUTOR_SERVICE,
@@ -214,6 +204,61 @@ public class TransportGetCheckpointAction extends HandledTransportAction<Request
                 (r, l) -> remoteClusterClient.execute(GetCheckpointAction.REMOTE_TYPE, r, l)
             );
         });
+    }
+
+    private void resolveLocalCheckpoints(
+        Task task,
+        Request request,
+        ClusterState clusterState,
+        OriginalIndices localIndices,
+        boolean includeResolvedIndexExpressions,
+        ActionListener<Response> listener
+    ) {
+
+        String[] concreteIndices;
+        if (crossProjectModeDecider.crossProjectEnabled() && TransformConfig.TRANSFORM_CROSS_PROJECT.isEnabled()) {
+            // For cross-project search, ResolvedIndexExpressions will have resolved our local indices already, and we will filter ones
+            // that have successfully resolved before calling their shards. Any indices that did not successfully resolve are validated
+            // when aggregated with all Response objects in validateAndMergeResponses().
+            concreteIndices = request.getResolvedIndexExpressions()
+                .expressions()
+                .stream()
+                .map(ResolvedIndexExpression::localExpressions)
+                .filter(
+                    localExpression -> localExpression
+                        .localIndexResolutionResult() == ResolvedIndexExpression.LocalIndexResolutionResult.SUCCESS
+                )
+                .map(ResolvedIndexExpression.LocalExpressions::indices)
+                .flatMap(Collection::stream)
+                .distinct()
+                .toArray(String[]::new);
+        } else {
+            // note: when security is turned on, the indices are already resolved
+            // TODO: do a quick check and only resolve if necessary??
+            concreteIndices = this.indexNameExpressionResolver.concreteIndexNames(clusterState, new IndicesRequest() {
+                @Override
+                public String[] indices() {
+                    return localIndices.indices();
+                }
+
+                @Override
+                public IndicesOptions indicesOptions() {
+                    return localIndices.indicesOptions();
+                }
+            });
+        }
+
+        if (concreteIndices.length > 0) {
+            var localRequest = request.rewriteRequest(
+                concreteIndices,
+                localIndices.indicesOptions(),
+                RemoteClusterAware.LOCAL_CLUSTER_GROUP_KEY,
+                includeResolvedIndexExpressions
+            );
+            resolveIndicesAndGetCheckpoint(task, localRequest, clusterState, listener);
+        } else {
+            listener.onResponse(new Response(Map.of(), includeResolvedIndexExpressions ? request.getResolvedIndexExpressions() : null));
+        }
     }
 
     private void validateAndMergeResponses(

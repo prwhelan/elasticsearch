@@ -41,6 +41,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -146,6 +147,7 @@ public abstract class TransformSingleNodeTestCase extends ESSingleNodeTestCase {
         var searchResponse = client().search(searchRequest).actionGet(TimeValue.THIRTY_SECONDS);
         return Arrays.stream(searchResponse.getHits().getHits())
             .map(SearchHit::getSourceAsMap)
+            .filter(source -> Objects.equals(source.get("transform_id"), transformId))
             .map(source -> source.get("message"))
             .map(Object::toString)
             .collect(Collectors.toSet());

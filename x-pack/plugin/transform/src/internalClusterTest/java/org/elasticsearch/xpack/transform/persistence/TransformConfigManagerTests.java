@@ -84,7 +84,8 @@ public class TransformConfigManagerTests extends TransformSingleNodeTestCase {
             clusterService,
             TestIndexNameExpressionResolver.newInstance(),
             client(),
-            xContentRegistry()
+            xContentRegistry(),
+            false
         );
     }
 

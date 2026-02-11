@@ -168,7 +168,8 @@ public class TransformCheckpointServiceNodeTests extends TransformSingleNodeTest
             clusterService,
             TestIndexNameExpressionResolver.newInstance(),
             client(),
-            xContentRegistry()
+            xContentRegistry(),
+            false
         );
 
         // use a mock for the checkpoint service

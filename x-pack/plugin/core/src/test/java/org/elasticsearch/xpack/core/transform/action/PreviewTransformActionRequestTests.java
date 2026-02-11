@@ -44,7 +44,7 @@ public class PreviewTransformActionRequestTests extends AbstractSerializingTrans
 
     @Override
     protected Request doParseInstance(XContentParser parser) throws IOException {
-        return Request.fromXContent(parser, AcknowledgedRequest.DEFAULT_ACK_TIMEOUT, false);
+        return Request.fromXContent(parser, AcknowledgedRequest.DEFAULT_ACK_TIMEOUT, false, false);
     }
 
     @Override
@@ -193,7 +193,7 @@ public class PreviewTransformActionRequestTests extends AbstractSerializingTrans
             )
         ) {
 
-            Request request = Request.fromXContent(parser, AcknowledgedRequest.DEFAULT_ACK_TIMEOUT, false);
+            Request request = Request.fromXContent(parser, AcknowledgedRequest.DEFAULT_ACK_TIMEOUT, false, false);
             assertThat(request.getConfig().getId(), is(equalTo(expectedTransformId)));
             assertThat(request.getConfig().getDestination().getIndex(), is(equalTo(expectedDestIndex)));
             assertThat(request.getConfig().getDestination().getPipeline(), is(equalTo(expectedDestPipeline)));

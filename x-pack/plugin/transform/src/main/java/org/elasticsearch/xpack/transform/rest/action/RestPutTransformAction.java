@@ -30,6 +30,12 @@ import static org.elasticsearch.rest.RestRequest.Method.PUT;
 @ServerlessScope(Scope.PUBLIC)
 public class RestPutTransformAction extends BaseRestHandler {
 
+    private final boolean crossProjectEnabled;
+
+    public RestPutTransformAction(boolean crossProjectEnabled) {
+        this.crossProjectEnabled = crossProjectEnabled;
+    }
+
     /**
      * Maximum allowed size of the REST request.
      *
@@ -65,7 +71,7 @@ public class RestPutTransformAction extends BaseRestHandler {
         boolean deferValidation = restRequest.paramAsBoolean(TransformField.DEFER_VALIDATION.getPreferredName(), false);
         TimeValue timeout = restRequest.paramAsTime(TransformField.TIMEOUT.getPreferredName(), AcknowledgedRequest.DEFAULT_ACK_TIMEOUT);
 
-        PutTransformAction.Request request = PutTransformAction.Request.fromXContent(parser, id, deferValidation, timeout);
+        var request = PutTransformAction.Request.fromXContent(parser, id, deferValidation, timeout, crossProjectEnabled);
 
         return channel -> new RestCancellableNodeClient(client, restRequest.getHttpChannel()).execute(
             PutTransformAction.INSTANCE,

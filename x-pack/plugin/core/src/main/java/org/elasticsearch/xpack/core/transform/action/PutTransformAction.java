@@ -76,9 +76,10 @@ public class PutTransformAction extends ActionType<AcknowledgedResponse> {
             final XContentParser parser,
             final String id,
             final boolean deferValidation,
-            final TimeValue timeout
+            final TimeValue timeout,
+            boolean crossProject
         ) {
-            return new Request(TransformConfig.fromXContent(parser, id, false), deferValidation, timeout);
+            return new Request(TransformConfig.fromXContent(parser, id, false, crossProject), deferValidation, timeout);
         }
 
         /**

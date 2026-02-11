@@ -75,6 +75,7 @@ import org.elasticsearch.xpack.core.transform.action.UpdateTransformAction;
 import org.elasticsearch.xpack.core.transform.action.UpgradeTransformsAction;
 import org.elasticsearch.xpack.core.transform.action.ValidateTransformAction;
 import org.elasticsearch.xpack.core.transform.transforms.SettingsConfig;
+import org.elasticsearch.xpack.core.transform.transforms.TransformConfig;
 import org.elasticsearch.xpack.transform.action.TransportDeleteTransformAction;
 import org.elasticsearch.xpack.transform.action.TransportGetCheckpointAction;
 import org.elasticsearch.xpack.transform.action.TransportGetCheckpointNodeAction;
@@ -222,7 +223,7 @@ public class Transform extends Plugin implements SystemIndexPlugin, PersistentTa
 
     @Override
     public List<RestHandler> getRestHandlers(
-        final Settings unused,
+        final Settings settings,
         NamedWriteableRegistry namedWriteableRegistry,
         final RestController restController,
         final ClusterSettings clusterSettings,
@@ -232,16 +233,17 @@ public class Transform extends Plugin implements SystemIndexPlugin, PersistentTa
         final Supplier<DiscoveryNodes> nodesInCluster,
         Predicate<NodeFeature> clusterSupportsFeature
     ) {
-
+        var crossProjectEnabled = new CrossProjectModeDecider(settings).crossProjectEnabled()
+            && TransformConfig.TRANSFORM_CROSS_PROJECT.isEnabled();
         return Arrays.asList(
-            new RestPutTransformAction(),
+            new RestPutTransformAction(crossProjectEnabled),
             new RestStartTransformAction(),
             new RestStopTransformAction(),
             new RestDeleteTransformAction(),
             new RestGetTransformAction(),
             new RestGetTransformStatsAction(),
-            new RestPreviewTransformAction(),
-            new RestUpdateTransformAction(),
+            new RestPreviewTransformAction(crossProjectEnabled),
+            new RestUpdateTransformAction(crossProjectEnabled),
             new RestCatTransformAction(),
             new RestUpgradeTransformsAction(),
             new RestResetTransformAction(),
@@ -286,11 +288,14 @@ public class Transform extends Plugin implements SystemIndexPlugin, PersistentTa
         Client client = services.client();
         ClusterService clusterService = services.clusterService();
 
+        var crossProjectModeDecider = new CrossProjectModeDecider(settings);
+
         TransformConfigManager configManager = new IndexBasedTransformConfigManager(
             clusterService,
             services.indexNameExpressionResolver(),
             client,
-            services.xContentRegistry()
+            services.xContentRegistry(),
+            crossProjectModeDecider.crossProjectEnabled() && TransformConfig.TRANSFORM_CROSS_PROJECT.isEnabled()
         );
         TransformAuditor auditor = new TransformAuditor(
             client,
@@ -319,14 +324,7 @@ public class Transform extends Plugin implements SystemIndexPlugin, PersistentTa
         var transformNode = new TransformNode(clusterStateListener);
 
         transformServices.set(
-            new TransformServices(
-                configManager,
-                checkpointService,
-                auditor,
-                scheduler,
-                transformNode,
-                new CrossProjectModeDecider(settings)
-            )
+            new TransformServices(configManager, checkpointService, auditor, scheduler, transformNode, crossProjectModeDecider)
         );
 
         var transformMeterRegistry = TransformMeterRegistry.create(services.telemetryProvider().getMeterRegistry());

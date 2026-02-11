@@ -318,9 +318,9 @@ public class TransformConfigTests extends AbstractSerializingTransformTestCase<T
     @Override
     protected TransformConfig doParseInstance(XContentParser parser) throws IOException {
         if (randomBoolean()) {
-            return TransformConfig.fromXContent(parser, transformId, runWithHeaders);
+            return TransformConfig.fromXContent(parser, transformId, runWithHeaders, false);
         } else {
-            return TransformConfig.fromXContent(parser, null, runWithHeaders);
+            return TransformConfig.fromXContent(parser, null, runWithHeaders, false);
         }
     }
 
@@ -1182,6 +1182,6 @@ public class TransformConfigTests extends AbstractSerializingTransformTestCase<T
     private TransformConfig createTransformConfigFromString(String json, String id, boolean lenient) throws IOException {
         final XContentParser parser = XContentType.JSON.xContent()
             .createParser(XContentParserConfiguration.EMPTY.withRegistry(xContentRegistry()), json);
-        return TransformConfig.fromXContent(parser, id, lenient);
+        return TransformConfig.fromXContent(parser, id, lenient, false);
     }
 }

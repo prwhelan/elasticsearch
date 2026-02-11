@@ -41,7 +41,7 @@ public class UpdateTransformsActionResponseTests extends AbstractSerializingTran
 
     @Override
     protected Response doParseInstance(XContentParser parser) throws IOException {
-        return new Response(TransformConfig.fromXContent(parser, null, false));
+        return new Response(TransformConfig.fromXContent(parser, null, false, false));
     }
 
 }

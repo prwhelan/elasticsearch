@@ -115,17 +115,20 @@ public class IndexBasedTransformConfigManager implements TransformConfigManager 
     private final IndexNameExpressionResolver indexNameExpressionResolver;
     private final Client client;
     private final NamedXContentRegistry xContentRegistry;
+    private final boolean crossProjectEnabled;
 
     public IndexBasedTransformConfigManager(
         ClusterService clusterService,
         IndexNameExpressionResolver indexNameExpressionResolver,
         Client client,
-        NamedXContentRegistry xContentRegistry
+        NamedXContentRegistry xContentRegistry,
+        boolean crossProjectEnabled
     ) {
         this.clusterService = clusterService;
         this.indexNameExpressionResolver = indexNameExpressionResolver;
         this.client = client;
         this.xContentRegistry = xContentRegistry;
+        this.crossProjectEnabled = crossProjectEnabled;
     }
 
     @Override
@@ -562,7 +565,7 @@ public class IndexBasedTransformConfigManager implements TransformConfigManager 
             Set<TransformConfig> configs = Sets.newLinkedHashSetWithExpectedSize(searchResponse.getHits().getHits().length);
             for (SearchHit hit : searchResponse.getHits().getHits()) {
                 try (XContentParser parser = createParser(hit)) {
-                    TransformConfig config = TransformConfig.fromXContent(parser, null, true);
+                    TransformConfig config = TransformConfig.fromXContent(parser, null, true, crossProjectEnabled);
                     if (ids.add(config.getId())) {
                         configs.add(config);
                     }
@@ -867,7 +870,7 @@ public class IndexBasedTransformConfigManager implements TransformConfigManager 
         ActionListener<TransformConfig> transformListener
     ) {
         try (XContentParser parser = createParser(source)) {
-            transformListener.onResponse(TransformConfig.fromXContent(parser, transformId, true));
+            transformListener.onResponse(TransformConfig.fromXContent(parser, transformId, true, crossProjectEnabled));
         } catch (Exception e) {
             logger.error(TransformMessages.getMessage(TransformMessages.FAILED_TO_PARSE_TRANSFORM_CONFIGURATION, transformId), e);
             transformListener.onFailure(e);

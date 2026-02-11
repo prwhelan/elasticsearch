@@ -35,6 +35,12 @@ import static org.elasticsearch.rest.RestRequest.Method.POST;
 @ServerlessScope(Scope.PUBLIC)
 public class RestPreviewTransformAction extends BaseRestHandler {
 
+    private final boolean crossProjectEnabled;
+
+    public RestPreviewTransformAction(boolean crossProjectEnabled) {
+        this.crossProjectEnabled = crossProjectEnabled;
+    }
+
     @Override
     public List<Route> routes() {
         return List.of(
@@ -75,7 +81,12 @@ public class RestPreviewTransformAction extends BaseRestHandler {
 
         if (Strings.isNullOrEmpty(transformId)) {
             previewRequestHolder.set(
-                PreviewTransformAction.Request.fromXContent(restRequest.contentOrSourceParamParser(), timeout, previewAsIndexRequest)
+                PreviewTransformAction.Request.fromXContent(
+                    restRequest.contentOrSourceParamParser(),
+                    timeout,
+                    previewAsIndexRequest,
+                    crossProjectEnabled
+                )
             );
         }
 

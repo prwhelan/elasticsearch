@@ -74,9 +74,10 @@ public class UpdateTransformAction extends ActionType<UpdateTransformAction.Resp
             final XContentParser parser,
             final String id,
             final boolean deferValidation,
-            final TimeValue timeout
+            final TimeValue timeout,
+            final boolean crossProject
         ) {
-            return new Request(TransformConfigUpdate.fromXContent(parser), id, deferValidation, timeout);
+            return new Request(TransformConfigUpdate.fromXContent(parser, crossProject), id, deferValidation, timeout);
         }
 
         /**

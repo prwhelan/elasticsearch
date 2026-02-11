@@ -38,7 +38,8 @@ public class AuthorizationStatePersistenceUtilsTests extends TransformSingleNode
             clusterService,
             TestIndexNameExpressionResolver.newInstance(),
             client(),
-            xContentRegistry()
+            xContentRegistry(),
+            false
         );
     }
 

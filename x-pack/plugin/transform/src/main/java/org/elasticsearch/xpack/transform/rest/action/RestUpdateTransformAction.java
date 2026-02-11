@@ -29,6 +29,12 @@ import static org.elasticsearch.xpack.transform.rest.action.RestPutTransformActi
 @ServerlessScope(Scope.PUBLIC)
 public class RestUpdateTransformAction extends BaseRestHandler {
 
+    private final boolean crossProjectEnabled;
+
+    public RestUpdateTransformAction(boolean crossProjectEnabled) {
+        this.crossProjectEnabled = crossProjectEnabled;
+    }
+
     @Override
     public List<Route> routes() {
         return List.of(new Route(POST, TransformField.REST_BASE_PATH_TRANSFORMS_BY_ID + "_update"));
@@ -54,7 +60,7 @@ public class RestUpdateTransformAction extends BaseRestHandler {
         TimeValue timeout = restRequest.paramAsTime(TransformField.TIMEOUT.getPreferredName(), AcknowledgedRequest.DEFAULT_ACK_TIMEOUT);
 
         XContentParser parser = restRequest.contentParser();
-        UpdateTransformAction.Request request = UpdateTransformAction.Request.fromXContent(parser, id, deferValidation, timeout);
+        var request = UpdateTransformAction.Request.fromXContent(parser, id, deferValidation, timeout, crossProjectEnabled);
 
         return channel -> client.execute(UpdateTransformAction.INSTANCE, request, new RestToXContentListener<>(channel));
     }

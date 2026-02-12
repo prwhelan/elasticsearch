@@ -79,7 +79,8 @@ public class TransportGetTransformAction extends AbstractTransportGetResourcesAc
         super(GetTransformAction.NAME, transportService, actionFilters, Request::new, client, xContentRegistry);
         this.clusterService = clusterService;
         this.client = client;
-        this.crossProjectEnabled = transformServices.crossProjectModeDecider().crossProjectEnabled();
+        this.crossProjectEnabled = transformServices.crossProjectModeDecider().crossProjectEnabled()
+            && TransformConfig.TRANSFORM_CROSS_PROJECT.isEnabled();
     }
 
     @Override

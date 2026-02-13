@@ -59,7 +59,6 @@ import org.elasticsearch.xpack.core.transform.action.GetCheckpointAction.Respons
 import org.elasticsearch.xpack.core.transform.action.GetCheckpointNodeAction;
 import org.elasticsearch.xpack.core.transform.transforms.TransformConfig;
 import org.elasticsearch.xpack.transform.TransformServices;
-import org.elasticsearch.xpack.transform.checkpoint.CheckpointException;
 
 import java.time.Clock;
 import java.util.Collection;
@@ -117,17 +116,11 @@ public class TransportGetCheckpointAction extends HandledTransportAction<Request
             crossProjectModeDecider.resolvesCrossProject(request)
                 ? indicesOptionsForCrossProjectFanout(request.indicesOptions())
                 : request.indicesOptions(),
-            request.indices(),
-            false
+            request.indices()
         );
 
-        // this can really only happen if there are remote-only requests and the requested remote clusters/projects do not exist
-        if (remoteClusterIndices.isEmpty()) {
-            listener.onFailure(new CheckpointException("No clusters exist for [{}]", String.join(",", request.indices())));
-            return;
-        }
-
         if (Assertions.ENABLED) {
+            assert remoteClusterIndices.size() > 0 : "We assume there is always at least the local cluster group.";
             var visited = new HashSet<String>();
             remoteClusterIndices.forEach((cluster, ignored) -> {
                 var uniqueCluster = visited.add(cluster);

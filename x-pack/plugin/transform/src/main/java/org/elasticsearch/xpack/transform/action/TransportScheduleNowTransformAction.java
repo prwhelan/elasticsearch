@@ -20,6 +20,7 @@ import org.elasticsearch.action.support.tasks.TransportTasksAction;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
+import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.injection.guice.Inject;
 import org.elasticsearch.persistent.PersistentTasksCustomMetadata;
 import org.elasticsearch.rest.RestStatus;
@@ -32,6 +33,7 @@ import org.elasticsearch.xpack.core.transform.TransformMetadata;
 import org.elasticsearch.xpack.core.transform.action.ScheduleNowTransformAction;
 import org.elasticsearch.xpack.core.transform.action.ScheduleNowTransformAction.Request;
 import org.elasticsearch.xpack.core.transform.action.ScheduleNowTransformAction.Response;
+import org.elasticsearch.xpack.core.transform.transforms.TimeSyncConfig;
 import org.elasticsearch.xpack.core.transform.transforms.TransformConfig;
 import org.elasticsearch.xpack.core.transform.transforms.TransformState;
 import org.elasticsearch.xpack.core.transform.transforms.TransformTaskState;
@@ -132,8 +134,19 @@ public class TransportScheduleNowTransformAction extends TransportTasksAction<Tr
             logger.debug("[{}] Destination index is blocked. User requested a retry.", transformTask.getTransformId());
             transformTask.getContext().setIsWaitingForIndexToUnblock(false);
         }
-        transformScheduler.scheduleNow(request.getId());
-        listener.onResponse(Response.TRUE);
+        if (request.defer()) {
+            transformConfigManager.getTransformConfiguration(request.getId(), listener.delegateFailureAndWrap((l, config) -> {
+                TimeValue deferDuration = TimeValue.ZERO;
+                if (config.getSyncConfig() instanceof TimeSyncConfig timeSyncConfig) {
+                    deferDuration = timeSyncConfig.getDelay();
+                }
+                transformScheduler.scheduleNow(request.getId(), deferDuration);
+                l.onResponse(Response.TRUE);
+            }));
+        } else {
+            transformScheduler.scheduleNow(request.getId());
+            listener.onResponse(Response.TRUE);
+        }
     }
 
     @Override

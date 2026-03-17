@@ -46,6 +46,7 @@ import org.elasticsearch.xpack.core.action.SetResetModeActionRequest;
 import org.elasticsearch.xpack.core.action.SetUpgradeModeActionRequest;
 import org.elasticsearch.xpack.core.action.XPackInfoFeatureAction;
 import org.elasticsearch.xpack.core.action.XPackUsageFeatureAction;
+import org.elasticsearch.xpack.core.crossproject.LinkedProjectsProvider;
 import org.elasticsearch.xpack.core.transform.TransformConfigVersion;
 import org.elasticsearch.xpack.core.transform.TransformField;
 import org.elasticsearch.xpack.core.transform.TransformMessages;
@@ -315,6 +316,10 @@ public class Transform extends Plugin implements SystemIndexPlugin, PersistentTa
         scheduler.start();
         var clusterStateListener = new TransformClusterStateListener(clusterService, client);
         var transformNode = new TransformNode(clusterStateListener);
+        var linkedProjectsProvider = LinkedProjectsProvider.Factory.create(
+            services.projectResolver(),
+            services.linkedProjectConfigService()
+        );
 
         transformServices.set(
             new TransformServices(
@@ -324,7 +329,7 @@ public class Transform extends Plugin implements SystemIndexPlugin, PersistentTa
                 scheduler,
                 transformNode,
                 crossProjectModeDecider,
-                projectId -> false
+                projectId -> linkedProjectsProvider.getLinkedProjects(projectId).isEmpty() == false
             )
         );
 

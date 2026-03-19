@@ -20,6 +20,8 @@ import java.util.concurrent.CopyOnWriteArraySet;
 /**
  * Helper method for maintaining a set of linked ProjectIds.
  * This splits into two implementations, one for single-project environments and one for multi-project environments.
+ * Most Elasticsearch deployments will not support multi-project, so we do not have to maintain the
+ * ConcurrentHashMap in those environments and can ignore the ProjectId entirely.
  */
 public interface LinkedProjectsProvider {
 

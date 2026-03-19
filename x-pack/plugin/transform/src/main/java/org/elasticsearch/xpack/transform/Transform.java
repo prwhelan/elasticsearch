@@ -21,6 +21,7 @@ import org.elasticsearch.client.internal.OriginSettingClient;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.metadata.IndexTemplateMetadata;
 import org.elasticsearch.cluster.metadata.Metadata;
+import org.elasticsearch.cluster.metadata.ProjectId;
 import org.elasticsearch.cluster.metadata.ProjectMetadata;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.project.ProjectResolver;
@@ -119,6 +120,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
@@ -316,10 +318,16 @@ public class Transform extends Plugin implements SystemIndexPlugin, PersistentTa
         scheduler.start();
         var clusterStateListener = new TransformClusterStateListener(clusterService, client);
         var transformNode = new TransformNode(clusterStateListener);
-        var linkedProjectsProvider = LinkedProjectsProvider.Factory.create(
-            services.projectResolver(),
-            services.linkedProjectConfigService()
-        );
+        Function<ProjectId, Boolean> hasLinkedProjects;
+        if (crossProjectModeDecider.crossProjectEnabled()) {
+            var linkedProjectsProvider = LinkedProjectsProvider.Factory.create(
+                services.projectResolver(),
+                services.linkedProjectConfigService()
+            );
+            hasLinkedProjects = projectId -> linkedProjectsProvider.getLinkedProjects(projectId).isEmpty() == false;
+        } else {
+            hasLinkedProjects = projectId -> false;
+        }
 
         transformServices.set(
             new TransformServices(
@@ -329,7 +337,7 @@ public class Transform extends Plugin implements SystemIndexPlugin, PersistentTa
                 scheduler,
                 transformNode,
                 crossProjectModeDecider,
-                projectId -> linkedProjectsProvider.getLinkedProjects(projectId).isEmpty() == false
+                hasLinkedProjects
             )
         );
 

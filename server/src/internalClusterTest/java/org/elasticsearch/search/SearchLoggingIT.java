@@ -54,6 +54,7 @@ import org.elasticsearch.script.ScriptType;
 import org.elasticsearch.search.builder.PointInTimeBuilder;
 import org.elasticsearch.test.AbstractSearchCancellationTestCase;
 import org.elasticsearch.test.ActivityLoggingUtils;
+import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.hamcrest.ElasticsearchAssertions;
 import org.junit.After;
 import org.junit.AfterClass;
@@ -65,12 +66,12 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-import static org.elasticsearch.action.search.SearchLogProducer.QUERY_FIELD_IS_SYSTEM;
 import static org.elasticsearch.action.search.SearchLogProducer.QUERY_FIELD_SEARCH_HITS;
 import static org.elasticsearch.action.search.SearchLogProducer.QUERY_FIELD_SEARCH_HITS_GTE;
 import static org.elasticsearch.common.logging.activity.ActivityLogProducer.EVENT_OUTCOME_FIELD;
 import static org.elasticsearch.common.logging.activity.QueryLogging.ES_QUERY_FIELDS_PREFIX;
 import static org.elasticsearch.common.logging.activity.QueryLogging.QUERY_FIELD_INDICES;
+import static org.elasticsearch.common.logging.activity.QueryLogging.QUERY_FIELD_IS_SYSTEM;
 import static org.elasticsearch.common.logging.activity.QueryLogging.QUERY_FIELD_QUERY;
 import static org.elasticsearch.common.logging.activity.QueryLogging.QUERY_FIELD_RESULT_COUNT;
 import static org.elasticsearch.common.logging.activity.QueryLogging.QUERY_FIELD_SHARDS;
@@ -96,6 +97,7 @@ import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.instanceOf;
 
+@ESIntegTestCase.ClusterScope(minNumDataNodes = 2)
 public class SearchLoggingIT extends AbstractSearchCancellationTestCase {
     static AccumulatingMockAppender appender;
     static Logger queryLog = LogManager.getLogger(QueryLogging.QUERY_LOGGER_NAME);

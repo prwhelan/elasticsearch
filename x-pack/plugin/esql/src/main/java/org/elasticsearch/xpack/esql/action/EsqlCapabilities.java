@@ -200,6 +200,11 @@ public class EsqlCapabilities {
         CASTING_OPERATOR_FOR_DATE,
 
         /**
+         * Support for the {@code ::tdigest} and {@code ::exponential_histogram} casting operators.
+         */
+        CASTING_OPERATOR_FOR_HISTOGRAM_TYPES,
+
+        /**
          * Blocks can be labelled with {@link org.elasticsearch.compute.data.Block.MvOrdering#SORTED_ASCENDING} for optimizations.
          */
         MV_ORDERING_SORTED_ASCENDING,
@@ -220,8 +225,8 @@ public class EsqlCapabilities {
         METADATA_FIELDS,
 
         /**
-         * Support for optional fields (might or might not be present in the mappings) using FAIL/NULLIFY only.
-         * Compared to {@link #OPTIONAL_FIELDS_V2}, this does not enable support for LOAD.
+         * Support for optional fields (might or might not be present in the mappings) using DEFAULT/NULLIFY only.
+         * Compared to {@link #OPTIONAL_FIELDS_V4}, this does not enable support for LOAD.
          */
         OPTIONAL_FIELDS_NULLIFY_TECH_PREVIEW,
 
@@ -237,10 +242,18 @@ public class EsqlCapabilities {
         OPTIONAL_FIELDS_NULLIFY_SKIP_GROUP_ALIASES,
 
         /**
-         * Support for optional fields (might or might not be present in the mappings) using FAIL/NULLIFY/LOAD.
-         * V2:  prevent pushing down filters and sorts to Lucene of potentially unmapped fields.
+         * Nullify unmapped fields in agg filters like {@code STATS agg_fun(field) WHERE field...}, even when
+         * {@link org.elasticsearch.xpack.esql.analysis.Analyzer.ResolveRefs} marks the field as unresolvable with a custom error message.
          */
-        OPTIONAL_FIELDS_V2(Build.current().isSnapshot()),
+        OPTIONAL_FIELDS_DETECT_UNMAPPED_FIELDS_IN_AGG_FILTERS,
+
+        /**
+         * Support for optional fields (might or might not be present in the mappings) using DEFAULT/NULLIFY/LOAD.
+         * V2:  Prevent pushing down filters and sorts to Lucene of potentially unmapped fields.
+         * V3:  Fix synthetic _source numeric load bug (#143916)
+         * V4:  Support for union type like resolution for load.
+         */
+        OPTIONAL_FIELDS_V4(Build.current().isSnapshot()),
 
         /**
          * Support specifically for *just* the _index METADATA field. Used by CsvTests, since that is the only metadata field currently
@@ -351,6 +364,12 @@ public class EsqlCapabilities {
         ENRICH_LOAD,
 
         /**
+         * Test-only capability since loading a value from a flattened field is possible using the unmapped field infrastructure, but
+         * is only supported by full integration tests. So this capability is used to disable some tests in CsvTests.
+         */
+        LOAD_FLATTENED_FIELD,
+
+        /**
          * Optimization for ST_CENTROID changed some results in cartesian data. #108713
          */
         ST_CENTROID_AGG_OPTIMIZED,
@@ -436,6 +455,16 @@ public class EsqlCapabilities {
          * Fix for spatial centroid when no records are found.
          */
         SPATIAL_CENTROID_NO_RECORDS,
+
+        /**
+         * Support for ST_CENTROID_AGG aggregation on geo_shape and cartesian_shape fields.
+         */
+        ST_CENTROID_AGG_SHAPES,
+
+        /**
+         * Support for ST_CENTROID_AGG aggregation on shapes from doc-values.
+         */
+        ST_CENTROID_AGG_SHAPES_DOC_VALUES,
 
         /**
          * Support ST_ENVELOPE function (and related ST_XMIN, etc.).
@@ -775,7 +804,10 @@ public class EsqlCapabilities {
          * QSTR function
          */
         QSTR_FUNCTION,
-
+        /**
+         * Guards a fix for the boost parameter in QueryString queries
+         */
+        QSTR_FUNCTION_BOOST_FIX,
         /**
          * MATCH function
          */
@@ -826,6 +858,11 @@ public class EsqlCapabilities {
          * _source field mapping directives: https://www.elastic.co/guide/en/elasticsearch/reference/current/mapping-source-field.html
          */
         SOURCE_FIELD_MAPPING,
+
+        /**
+         * Support for field aliases in mappings. Used by tests, since this was feature wasn't always supported by CsvTests.
+         */
+        FIELD_ALIAS_SUPPORT,
 
         /**
          * Allow filter per individual aggregation.
@@ -1059,11 +1096,6 @@ public class EsqlCapabilities {
         FULL_TEXT_FUNCTIONS_DISJUNCTIONS_SCORE,
 
         /**
-         * Support for multi-match function.
-         */
-        MULTI_MATCH_FUNCTION(Build.current().isSnapshot()),
-
-        /**
          * Do {@code TO_LOWER} and {@code TO_UPPER} process all field values?
          */
         TO_LOWER_MV,
@@ -1150,17 +1182,17 @@ public class EsqlCapabilities {
         /**
          * Support non-correlated subqueries in the FROM clause.
          */
-        SUBQUERY_IN_FROM_COMMAND(Build.current().isSnapshot()),
+        SUBQUERY_IN_FROM_COMMAND,
 
         /**
          * Support non-correlated subqueries in the FROM clause without implicit limit.
          */
-        SUBQUERY_IN_FROM_COMMAND_WITHOUT_IMPLICIT_LIMIT(Build.current().isSnapshot()),
+        SUBQUERY_IN_FROM_COMMAND_WITHOUT_IMPLICIT_LIMIT,
 
         /**
          * Append an implicit limit to unbounded sorts in subqueries in the FROM clause.
          */
-        SUBQUERY_IN_FROM_COMMAND_APPEND_IMPLICIT_LIMIT_TO_UNBOUNDED_SORT_IN_SUBQUERY(Build.current().isSnapshot()),
+        SUBQUERY_IN_FROM_COMMAND_APPEND_IMPLICIT_LIMIT_TO_UNBOUNDED_SORT_IN_SUBQUERY,
 
         /**
          * Support for views in cluster state (and REST API).
@@ -1179,6 +1211,10 @@ public class EsqlCapabilities {
          * Views with branching (requires subqueries/FORK).
          */
         VIEWS_WITH_BRANCHING(VIEWS_WITH_NO_BRANCHING.isEnabled() && SUBQUERY_IN_FROM_COMMAND.isEnabled()),
+        /**
+         * Added telemetry for views
+         */
+        VIEWS_TELEMETRY,
 
         /**
          * Support for the {@code leading_zeros} named parameter.
@@ -1415,6 +1451,10 @@ public class EsqlCapabilities {
          * (Re)Added EXPLAIN command
          */
         EXPLAIN(Build.current().isSnapshot()),
+        /**
+         * EXPLAIN command with remote plans (5 columns: cluster, node, role, type, plan)
+         */
+        EXPLAIN_WITH_REMOTE_PLANS(Build.current().isSnapshot()),
         /**
          * Support for the RLIKE operator with a list of regexes.
          */
@@ -1855,6 +1895,11 @@ public class EsqlCapabilities {
         TIME_SERIES_WINDOW_V1,
 
         /**
+         * Supporting grouping window in time-series where the window is smaller than the time bucket
+         */
+        TIME_SERIES_WINDOW_SMALLER_THAN_BUCKET,
+
+        /**
          * Support like/rlike parameters https://github.com/elastic/elasticsearch/issues/131356
          */
         LIKE_PARAMETER_SUPPORT,
@@ -1929,10 +1974,15 @@ public class EsqlCapabilities {
         PROMQL_IMPLICIT_RANGE_SELECTOR,
 
         /**
-         * Support for {@code TIME_SERIES_WITHOUT_GROUPING} capability for the
-         * grouping function that excludes specific dimensions from time-series grouping.
+         * Support for PromQL {@code without} grouping.
          */
-        TIME_SERIES_WITHOUT_GROUPING,
+        PROMQL_WITHOUT_GROUPING,
+
+        /**
+         * Support for`WITHOUT` grouping function
+         * that excludes specific dimensions from time-series grouping.
+         */
+        ESQL_WITHOUT_GROUPING,
 
         /**
          * KNN function adds support for k and visit_percentage options
@@ -1981,11 +2031,6 @@ public class EsqlCapabilities {
          * https://github.com/elastic/elasticsearch/issues/138283
          */
         FIX_INLINE_STATS_INCORRECT_PRUNNING(INLINE_STATS.enabled),
-
-        /**
-         * Support for ST_CENTROID_AGG aggregation on geo_shape and cartesian_shape fields.
-         */
-        ST_CENTROID_AGG_SHAPES,
 
         /**
          * {@link ReplaceStatsFilteredOrNullAggWithEval} replaced a stats
@@ -2086,7 +2131,7 @@ public class EsqlCapabilities {
         /**
          * Support query approximation.
          */
-        APPROXIMATION_V2(Build.current().isSnapshot()),
+        APPROXIMATION_V6(Build.current().isSnapshot()),
 
         /**
          * Create a ScoreOperator only when shard contexts are available
@@ -2113,6 +2158,16 @@ public class EsqlCapabilities {
          * Support for configuring T-Digest elasticsearch field as a time series metric.
          */
         TDIGEST_TIME_SERIES_METRIC,
+
+        /**
+         * Support for the {@code TO_EXPONENTIAL_HISTOGRAM} conversion function.
+         */
+        TO_EXPONENTIAL_HISTOGRAM,
+
+        /**
+         * Support for converting {@code exponential_histogram} fields via {@code TO_TDIGEST}.
+         */
+        TO_TDIGEST_FROM_EXPONENTIAL_HISTOGRAM,
 
         /**
          * Support for {@code MEDIAN} aggregation on {@code tdigest} type fields.
@@ -2161,6 +2216,11 @@ public class EsqlCapabilities {
         METRICS_INFO_COMMAND,
 
         /**
+         * Support for TBUCKET with numeric bucket count and optional from/to parameters.
+         */
+        TBUCKET_FROM_TO,
+
+        /**
          * Supports the REGISTERED_DOMAIN command.
          */
         REGISTERED_DOMAIN_COMMAND,
@@ -2174,7 +2234,12 @@ public class EsqlCapabilities {
         /**
          * Support for the EXTERNAL command (datasource access).
          */
-        EXTERNAL_COMMAND(Build.current().isSnapshot()),
+        EXTERNAL_COMMAND(EsqlFeatureFlags.ESQL_EXTERNAL_DATASOURCES_FEATURE_FLAG.isEnabled()),
+
+        /**
+         * Support for the EXTERNAL command (datasource access).
+         */
+        EXTERNAL_CSV_IP_SUPPORT(EsqlFeatureFlags.ESQL_EXTERNAL_DATASOURCES_FEATURE_FLAG.isEnabled()),
 
         /**
          * https://github.com/elastic/elasticsearch/issues/142219
@@ -2226,6 +2291,11 @@ public class EsqlCapabilities {
         FIX_UNMAPPED_FIELDS_IN_ESRELATION,
 
         /**
+         * Support for dense_vector equality and inequality operators (==, !=).
+         */
+        DENSE_VECTOR_EQUALITY,
+
+        /**
          * Fix for not including metadata _doc_count in the _timeseries column
          * https://github.com/elastic/elasticsearch/issues/143464
          */
@@ -2242,6 +2312,102 @@ public class EsqlCapabilities {
          * https://github.com/elastic/elasticsearch/issues/143859
          */
         FIX_FULL_TEXT_FUNCTIONS_ON_RENAMED_FIELDS,
+
+        /**
+         * TOP_SNIPPETS checks that the query is foldable
+         */
+        TOP_SNIPPETS_FOLDABLE_QUERY_CHECK,
+
+        /**
+         * Fixes an analysis bug in {@code FORK} with {@code unmapped_fields="nullify"}.
+         * Preserve existing attribute {@code NameId}s so that references from upper plan nodes remain valid after
+         * sub-plans are updated. Only genuinely new attributes get fresh NameIds.
+         * Keeping the same attributes can have unintended side effects when applying optimizations like constant folding.
+         * https://github.com/elastic/elasticsearch/issues/142762
+         */
+        FIX_FORK_UNMAPPED_NULLIFY,
+
+        /**
+         * Fix for the STATS BY ALL with LIMIT 0.
+         * https://github.com/elastic/elasticsearch/issues/144024
+         */
+        FIX_LIMIT_ZERO_IN_STATS_BY_ALL,
+
+        /**
+         * Fix field caps incorrectly synthesizing object parents under subobjects:false (passthrough) mappers,
+         * causing false type conflicts in ES|QL when querying across indices.
+         * https://github.com/elastic/elasticsearch/issues/144179
+         */
+        FIX_PASSTHROUGH_FIELD_CAPS_OBJECT_PARENT,
+
+        /**
+         * Enables the feature LIMIT n BY expr1, expr2 for retaining at most n docs per group.
+         * The feature will not work if we had SORT | LIMIT n BY
+         */
+        ESQL_LIMIT_BY(Build.current().isSnapshot()),
+
+        /**
+         * Enables the SORT | LIMIT n BY expr1, expr2 support, see ESQL_LIMIT_BY for more context
+         */
+        ESQL_TOPN_BY(Build.current().isSnapshot()),
+
+        /**
+         * Corrects a bug with ENRICH when a shard does not contain an index field and we use LIMIT BY on top
+         */
+        LIMIT_BY_ENRICH_FIX(ESQL_LIMIT_BY.isEnabled()),
+
+        /**
+         * Fix window validation in time-series aggregations when TBUCKET uses a numeric target bucket count.
+         */
+        FIX_TBUCKET_TARGET_COUNT_WINDOW_VALIDATION,
+
+        /**
+         * Support the null column type for the CHANGE_POINT command
+         * <a href="https://github.com/elastic/elasticsearch/pull/144388"></a>
+         */
+        CHANGE_POINT_SUPPORT_NULL_COLUMN,
+
+        /**
+         * MMR fixes for constant folding
+         */
+        MMR_FOLDABLE_QUERY_VECTOR_FIX,
+
+        /**
+         * Support CHANGE_POINT arguments in any order
+         */
+        CHANGE_POINT_ARGS_ANY_ORDER,
+
+        /**
+         * Reject loading sub-fields of flattened fields when {@code unmapped_fields="load"}
+         * See https://github.com/elastic/elasticsearch/issues/143494
+         */
+        REJECT_LOADING_FLATTENED_SUBFIELDS(OPTIONAL_FIELDS_V4.isEnabled()),
+
+        FIX_DIV_ERROR_MESSAGE,
+
+        /**
+         * Added {@link org.elasticsearch.xpack.esql.planner.PlannerSettings#DOC_THRESHOLD_AUTO_PARTITIONING}
+         */
+        AUTO_PARTITION_DOCS_THRESHOLD,
+
+        /**
+         * Rename the {@code unmapped_fields} default setting from {@code "fail"} to {@code "default"}.
+         * See https://github.com/elastic/elasticsearch/issues/144833
+         */
+        UNMAPPED_FIELDS_DEFAULT_SETTING_RENAME,
+
+        /**
+         * Fix for {@code SUM(null)} producing a type mismatch after surrogate expansion.
+         * See https://github.com/elastic/elasticsearch/issues/144914
+         */
+        FIX_SUM_OF_NULL_OPTIMIZATION,
+
+        PROPAGATE_EMPTY_RELATION_PAST_JOINS,
+
+        /**
+         * Supports the {@code USER_AGENT} command.
+         */
+        USER_AGENT_COMMAND,
 
         // Last capability should still have a comma for fewer merge conflicts when adding new ones :)
         // This comment prevents the semicolon from being on the previous capability when Spotless formats the file.

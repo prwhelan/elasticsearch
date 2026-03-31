@@ -137,6 +137,9 @@ public class TSDBIndexingIT extends ESSingleNodeTestCase {
         if (IndexSettings.TSDB_SYNTHETIC_ID_FEATURE_FLAG && randomBoolean()) {
             templateSettings.put(IndexSettings.SYNTHETIC_ID.getKey(), true);
         }
+        if (IndexSettings.DISABLE_SEQUENCE_NUMBERS_FEATURE_FLAG && randomBoolean()) {
+            templateSettings.put(IndexSettings.DISABLE_SEQUENCE_NUMBERS.getKey(), true);
+        }
         var mapping = new CompressedXContent(randomBoolean() ? MAPPING_TEMPLATE : MAPPING_TEMPLATE.replace("date", "date_nanos"));
 
         if (randomBoolean()) {
@@ -201,6 +204,12 @@ public class TSDBIndexingIT extends ESSingleNodeTestCase {
         CountDownLatch latch = new CountDownLatch(1);
         updateTimeSeriesRangeService.perform(latch::countDown);
         latch.await();
+
+        // maybe force merge
+        if (randomBoolean()) {
+            var forceMergeResponse = client().admin().indices().forceMerge(new ForceMergeRequest("k8s").maxNumSegments(1)).actionGet();
+            assertEquals(0, forceMergeResponse.getShardFailures().length);
+        }
 
         // index again and check for success
         {
@@ -337,6 +346,9 @@ public class TSDBIndexingIT extends ESSingleNodeTestCase {
         if (IndexSettings.TSDB_SYNTHETIC_ID_FEATURE_FLAG && randomBoolean()) {
             settingsBuilder.put(IndexSettings.SYNTHETIC_ID.getKey(), true);
         }
+        if (IndexSettings.DISABLE_SEQUENCE_NUMBERS_FEATURE_FLAG && randomBoolean()) {
+            settingsBuilder.put(IndexSettings.DISABLE_SEQUENCE_NUMBERS.getKey(), true);
+        }
         request.indexTemplate(
             ComposableIndexTemplate.builder()
                 .indexPatterns(List.of("k8s*"))
@@ -387,6 +399,9 @@ public class TSDBIndexingIT extends ESSingleNodeTestCase {
             var templateSettings = Settings.builder().put("index.mode", "time_series").put("index.routing_path", "metricset");
             if (IndexSettings.TSDB_SYNTHETIC_ID_FEATURE_FLAG && randomBoolean()) {
                 templateSettings.put(IndexSettings.SYNTHETIC_ID.getKey(), true);
+            }
+            if (IndexSettings.DISABLE_SEQUENCE_NUMBERS_FEATURE_FLAG && randomBoolean()) {
+                templateSettings.put(IndexSettings.DISABLE_SEQUENCE_NUMBERS.getKey(), true);
             }
             var request = new TransportPutComposableIndexTemplateAction.Request("id1");
             request.indexTemplate(
@@ -459,6 +474,10 @@ public class TSDBIndexingIT extends ESSingleNodeTestCase {
             // This test checks that _id's are pruned, that only applies
             // when regular _id's are used.
             indexSettings.put(IndexSettings.SYNTHETIC_ID.getKey(), false);
+        }
+        if (IndexSettings.DISABLE_SEQUENCE_NUMBERS_FEATURE_FLAG) {
+            // This test relies on sequence numbers to verify ids.
+            indexSettings.put(IndexSettings.DISABLE_SEQUENCE_NUMBERS.getKey(), false);
         }
         putTemplateRequest.indexTemplate(
             ComposableIndexTemplate.builder()
@@ -591,6 +610,9 @@ public class TSDBIndexingIT extends ESSingleNodeTestCase {
         if (IndexSettings.TSDB_SYNTHETIC_ID_FEATURE_FLAG && randomBoolean()) {
             templateSettings.put(IndexSettings.SYNTHETIC_ID.getKey(), true);
         }
+        if (IndexSettings.DISABLE_SEQUENCE_NUMBERS_FEATURE_FLAG && randomBoolean()) {
+            templateSettings.put(IndexSettings.DISABLE_SEQUENCE_NUMBERS.getKey(), true);
+        }
         var putTemplateRequest = new TransportPutComposableIndexTemplateAction.Request("id");
         putTemplateRequest.indexTemplate(
             ComposableIndexTemplate.builder()
@@ -649,6 +671,9 @@ public class TSDBIndexingIT extends ESSingleNodeTestCase {
             .put("index.dimensions_tsid_strategy_enabled", indexDimensionsTsidStrategyEnabled);
         if (IndexSettings.TSDB_SYNTHETIC_ID_FEATURE_FLAG && randomBoolean()) {
             templateSettings.put(IndexSettings.SYNTHETIC_ID.getKey(), true);
+        }
+        if (IndexSettings.DISABLE_SEQUENCE_NUMBERS_FEATURE_FLAG && randomBoolean()) {
+            templateSettings.put(IndexSettings.DISABLE_SEQUENCE_NUMBERS.getKey(), true);
         }
         putTemplateRequest.indexTemplate(
             ComposableIndexTemplate.builder()
@@ -734,6 +759,9 @@ public class TSDBIndexingIT extends ESSingleNodeTestCase {
         if (IndexSettings.TSDB_SYNTHETIC_ID_FEATURE_FLAG && randomBoolean()) {
             templateSettings.put(IndexSettings.SYNTHETIC_ID.getKey(), true);
         }
+        if (IndexSettings.DISABLE_SEQUENCE_NUMBERS_FEATURE_FLAG && randomBoolean()) {
+            templateSettings.put(IndexSettings.DISABLE_SEQUENCE_NUMBERS.getKey(), true);
+        }
         var putTemplateRequest = new TransportPutComposableIndexTemplateAction.Request("id");
         putTemplateRequest.indexTemplate(
             ComposableIndexTemplate.builder()
@@ -799,6 +827,9 @@ public class TSDBIndexingIT extends ESSingleNodeTestCase {
         var templateSettings = Settings.builder().put("index.mode", "time_series");
         if (IndexSettings.TSDB_SYNTHETIC_ID_FEATURE_FLAG && randomBoolean()) {
             templateSettings.put(IndexSettings.SYNTHETIC_ID.getKey(), true);
+        }
+        if (IndexSettings.DISABLE_SEQUENCE_NUMBERS_FEATURE_FLAG && randomBoolean()) {
+            templateSettings.put(IndexSettings.DISABLE_SEQUENCE_NUMBERS.getKey(), true);
         }
         var putTemplateRequest = new TransportPutComposableIndexTemplateAction.Request("id");
         putTemplateRequest.indexTemplate(

@@ -28,11 +28,13 @@ import org.elasticsearch.core.CheckedFunction;
 import org.elasticsearch.index.IndexMode;
 import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.index.IndexVersion;
+import org.elasticsearch.index.IndexVersions;
 import org.elasticsearch.index.fielddata.FieldDataContext;
 import org.elasticsearch.index.fielddata.IndexFieldData;
 import org.elasticsearch.index.fielddata.plain.BytesBinaryIndexFieldData;
 import org.elasticsearch.index.mapper.BinaryFieldMapper;
 import org.elasticsearch.index.mapper.DocumentParserContext;
+import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.index.mapper.KeywordFieldMapper;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.MapperBuilderContext;
@@ -50,16 +52,15 @@ import org.elasticsearch.search.aggregations.support.CoreValuesSourceType;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.xcontent.NamedXContentRegistry;
 import org.elasticsearch.xcontent.XContentParserConfiguration;
-import org.mockito.Mockito;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.BiFunction;
+import java.util.stream.Collectors;
 
 import static org.hamcrest.Matchers.greaterThan;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 public class QueryBuilderStoreTests extends ESTestCase {
 
@@ -83,7 +84,6 @@ public class QueryBuilderStoreTests extends ESTestCase {
             BinaryFieldMapper fieldMapper = PercolatorFieldMapper.Builder.createQueryBuilderFieldBuilder(
                 MapperBuilderContext.root(false, false)
             );
-            MappedFieldType.FielddataOperation fielddataOperation = MappedFieldType.FielddataOperation.SEARCH;
 
             try (IndexWriter indexWriter = new IndexWriter(directory, config)) {
                 for (int i = 0; i < queryBuilders.length; i++) {
@@ -100,18 +100,59 @@ public class QueryBuilderStoreTests extends ESTestCase {
                 }
             }
 
-            SearchExecutionContext searchExecutionContext = mock(SearchExecutionContext.class);
-            when(searchExecutionContext.indexVersionCreated()).thenReturn(IndexVersion.current());
-            when(searchExecutionContext.getWriteableRegistry()).thenReturn(writableRegistry());
-            when(searchExecutionContext.getParserConfig()).thenReturn(parserConfig());
-            when(searchExecutionContext.getForField(fieldMapper.fieldType(), fielddataOperation)).thenReturn(
-                new BytesBinaryIndexFieldData(fieldMapper.fullPath(), CoreValuesSourceType.KEYWORD)
+            IndexVersion indexVersion = IndexVersion.current();
+            NamedWriteableRegistry writeableRegistry = writableRegistry();
+            XContentParserConfiguration parserConfig = parserConfig();
+            BytesBinaryIndexFieldData fieldData = new BytesBinaryIndexFieldData(fieldMapper.fullPath(), CoreValuesSourceType.KEYWORD);
+            BiFunction<MappedFieldType, FieldDataContext, IndexFieldData<?>> indexFieldDataLookup = (mft, fdc) -> fieldData;
+            Settings indexSettingsSettings = indexSettings(indexVersion, 1, 1).build();
+            IndexSettings indexSettings = new IndexSettings(
+                IndexMetadata.builder("test").settings(indexSettingsSettings).build(),
+                Settings.EMPTY
             );
-            when(searchExecutionContext.getFieldType(Mockito.anyString())).thenAnswer(invocation -> {
-                final String fieldName = (String) invocation.getArguments()[0];
-                return new KeywordFieldMapper.KeywordFieldType(fieldName);
-            });
-            PercolateQuery.QueryStore queryStore = PercolateQueryBuilder.createStore(fieldMapper.fieldType(), searchExecutionContext);
+            List<String> fieldNames = Arrays.stream(queryBuilders).map(TermQueryBuilder::fieldName).distinct().toList();
+            List<FieldMapper> keywordMappers = fieldNames.stream()
+                .map(
+                    name -> new KeywordFieldMapper.Builder(name, IndexVersions.UPGRADE_TO_LUCENE_9_12_2).build(
+                        MapperBuilderContext.root(false, false)
+                    )
+                )
+                .collect(Collectors.toList());
+            MappingLookup mappingLookup = MappingLookup.fromMappers(
+                Mapping.EMPTY,
+                keywordMappers,
+                Collections.emptyList(),
+                IndexMode.STANDARD
+            );
+            SearchExecutionContext searchExecutionContext = new SearchExecutionContext(
+                0,
+                0,
+                indexSettings,
+                null,
+                indexFieldDataLookup,
+                null,
+                mappingLookup,
+                null,
+                null,
+                parserConfig,
+                writeableRegistry,
+                null,
+                null,
+                System::currentTimeMillis,
+                null,
+                null,
+                () -> true,
+                null,
+                Collections.emptyMap(),
+                null,
+                MapperMetrics.NOOP
+            );
+
+            PercolateQuery.QueryStore queryStore = PercolateQueryBuilder.createStore(
+                fieldMapper.fieldType(),
+                randomBoolean(),
+                searchExecutionContext
+            );
 
             try (IndexReader indexReader = DirectoryReader.open(directory)) {
                 LeafReaderContext leafContext = indexReader.leaves().get(0);
@@ -204,7 +245,11 @@ public class QueryBuilderStoreTests extends ESTestCase {
             );
             SearchExecutionContext searchExecutionContext = new SearchExecutionContext(baseContext, circuitBreaker);
 
-            PercolateQuery.QueryStore queryStore = PercolateQueryBuilder.createStore(fieldMapper.fieldType(), searchExecutionContext);
+            PercolateQuery.QueryStore queryStore = PercolateQueryBuilder.createStore(
+                fieldMapper.fieldType(),
+                randomBoolean(),
+                searchExecutionContext
+            );
 
             try (IndexReader indexReader = DirectoryReader.open(directory)) {
                 LeafReaderContext leafContext = indexReader.leaves().get(0);

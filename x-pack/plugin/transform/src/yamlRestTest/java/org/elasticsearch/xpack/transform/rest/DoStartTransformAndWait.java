@@ -11,12 +11,15 @@ import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.common.xcontent.XContentHelper;
+import org.elasticsearch.logging.LogManager;
+import org.elasticsearch.logging.Logger;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.test.rest.yaml.ClientYamlTestExecutionContext;
 import org.elasticsearch.test.rest.yaml.section.DoSection;
 import org.elasticsearch.test.rest.yaml.section.ExecutableSection;
 import org.elasticsearch.xcontent.XContentLocation;
 import org.elasticsearch.xcontent.XContentType;
+import org.elasticsearch.xpack.core.transform.transforms.TransformStats;
 
 import java.io.IOException;
 import java.util.List;
@@ -38,6 +41,8 @@ import java.util.function.Supplier;
  */
 final class DoStartTransformAndWait implements ExecutableSection {
 
+    private static final Logger logger = LogManager.getLogger(DoStartTransformAndWait.class);
+
     private final DoSection delegate;
     private final Supplier<RestClient> adminClientSupplier;
 
@@ -52,7 +57,6 @@ final class DoStartTransformAndWait implements ExecutableSection {
         return delegate.getLocation();
     }
 
-    @SuppressWarnings("unchecked")
     @Override
     public void execute(ClientYamlTestExecutionContext executionContext) throws IOException {
         delegate.execute(executionContext);
@@ -69,15 +73,7 @@ final class DoStartTransformAndWait implements ExecutableSection {
         try {
             ESTestCase.assertBusy(() -> {
                 try {
-                    Request statsRequest = new Request("GET", "/_transform/" + transformId + "/_stats");
-                    Response statsResponse = adminClientSupplier.get().performRequest(statsRequest);
-                    Map<String, Object> body = XContentHelper.convertToMap(
-                        XContentType.JSON.xContent(),
-                        statsResponse.getEntity().getContent(),
-                        false
-                    );
-                    List<Map<String, Object>> transforms = (List<Map<String, Object>>) body.get("transforms");
-                    Map<String, Object> transformStats = transforms.get(0);
+                    Map<String, Object> transformStats = fetchFirstTransformStats(transformId);
                     if (hasBeenInitialized(transformStats)) {
                         return;
                     }
@@ -88,11 +84,62 @@ final class DoStartTransformAndWait implements ExecutableSection {
                     throw new AssertionError("Failed to get transform stats for [" + transformId + "]", e);
                 }
             }, 30, TimeUnit.SECONDS);
-        } catch (Exception | AssertionError e) {
-            // The transform may be a batch transform on an empty index that completed before
-            // our first poll, leaving stats indistinguishable from an unstarted transform.
-            // Proceed and let subsequent test assertions determine correctness.
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("interrupted while waiting for transform to initialize", e);
+        } catch (AssertionError busyFailure) {
+            final Map<String, Object> finalStats;
+            try {
+                finalStats = fetchFirstTransformStats(transformId);
+            } catch (IOException e) {
+                AssertionError err = new AssertionError("Failed to fetch transform stats after wait for [" + transformId + "]", e);
+                err.addSuppressed(busyFailure);
+                throw err;
+            }
+            String state = (String) finalStats.get("state");
+            if ("failed".equals(state)) {
+                throw new AssertionError("Transform [" + transformId + "] is in failed state after wait; stats=" + finalStats, busyFailure);
+            }
+            if (hasBeenInitialized(finalStats)) {
+                throw new AssertionError(
+                    "Transform [" + transformId + "] appears initialized after timeout; stats=" + finalStats,
+                    busyFailure
+                );
+            }
+            logger.warn(
+                "Transform [{}] still appears uninitialized after wait (state=[{}], reason=[{}]); assuming fast-completing batch edge case",
+                transformId,
+                state,
+                finalStats.get(TransformStats.REASON_FIELD.getPreferredName())
+            );
+        } catch (Exception e) {
+            throw new IOException("unexpected exception while waiting for transform to initialize", e);
         }
+    }
+
+    private Map<String, Object> fetchFirstTransformStats(String transformId) throws IOException {
+        Request statsRequest = new Request("GET", "/_transform/" + transformId + "/_stats");
+        Response statsResponse = adminClientSupplier.get().performRequest(statsRequest);
+        Map<String, Object> body = XContentHelper.convertToMap(XContentType.JSON.xContent(), statsResponse.getEntity().getContent(), false);
+        Object transformsObj = body.get("transforms");
+        if (transformsObj == null) {
+            throw new AssertionError(
+                "Expected [transforms] in stats response for transform [" + transformId + "]; top-level keys were " + body.keySet()
+            );
+        }
+        if (transformsObj instanceof List<?> == false) {
+            throw new AssertionError(
+                "Expected [transforms] to be a list for transform [" + transformId + "], was [" + transformsObj.getClass().getName() + "]"
+            );
+        }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> transforms = (List<Map<String, Object>>) transformsObj;
+        if (transforms.size() != 1) {
+            throw new AssertionError(
+                "Expected exactly one transform in stats for [" + transformId + "], but got size [" + transforms.size() + "]"
+            );
+        }
+        return transforms.get(0);
     }
 
     @SuppressWarnings("unchecked")

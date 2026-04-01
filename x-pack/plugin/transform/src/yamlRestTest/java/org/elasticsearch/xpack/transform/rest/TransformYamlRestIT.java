@@ -66,7 +66,7 @@ public class TransformYamlRestIT extends ESClientYamlSuiteTestCase {
             var testSection = candidate.getTestSection();
             List<ExecutableSection> updated = testSection.getExecutableSections().stream().map(section -> {
                 if (section instanceof DoSection doSection && "transform.start_transform".equals(doSection.getApiCallSection().getApi())) {
-                    return (ExecutableSection) new DoStartTransformAndWait(doSection, TransformYamlRestIT::adminClient);
+                    return new DoStartTransformAndWait(doSection, TransformYamlRestIT::adminClient);
                 }
                 return section;
             }).toList();

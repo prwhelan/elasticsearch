@@ -642,11 +642,14 @@ public abstract class ESRestTestCase extends ESTestCase {
     @After
     public final void cleanUpCluster() throws Exception {
         if (previousFailureSkipsRemaining() == false && preserveClusterUponCompletion() == false) {
-            ensureNoInitializingShards();
-            wipeCluster();
-            waitForClusterStateUpdatesToFinish();
-            checkForUnexpectedlyRecreatedObjects();
-            logIfThereAreRunningTasks();
+            // Skip cleanup when there is no client (e.g. test failed during rolling upgrade after closeClients() but before initClient()).
+            if (cleanupClient != null) {
+                ensureNoInitializingShards();
+                wipeCluster();
+                waitForClusterStateUpdatesToFinish();
+                checkForUnexpectedlyRecreatedObjects();
+                logIfThereAreRunningTasks();
+            }
         }
     }
 
@@ -2884,6 +2887,7 @@ public abstract class ESRestTestCase extends ESTestCase {
             .entry("query", instanceOf(Map.class))
             .entry("planning", instanceOf(Map.class))
             .entry("parsing", instanceOf(Map.class))
+            .entry("view_resolution", instanceOf(Map.class))
             .entry("preanalysis", instanceOf(Map.class))
             .entry("dependency_resolution", instanceOf(Map.class))
             .entry("analysis", instanceOf(Map.class))

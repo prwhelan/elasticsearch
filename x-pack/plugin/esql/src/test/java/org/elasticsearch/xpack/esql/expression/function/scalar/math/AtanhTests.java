@@ -12,11 +12,13 @@ import ch.obermuhlner.math.big.BigDecimalMath;
 import com.carrotsearch.randomizedtesting.annotations.Name;
 import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
 
+import org.apache.lucene.tests.util.LuceneTestCase;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.core.type.DataType;
 import org.elasticsearch.xpack.esql.expression.function.AbstractScalarFunctionTestCase;
 import org.elasticsearch.xpack.esql.expression.function.TestCaseSupplier;
+import org.elasticsearch.xpack.esql.expression.function.UnaryTestCaseHelper;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
@@ -24,9 +26,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 
+import static org.elasticsearch.xpack.esql.expression.function.TestCaseSupplier.unary;
 import static org.hamcrest.Matchers.closeTo;
 import static org.hamcrest.Matchers.equalTo;
 
+@LuceneTestCase.AwaitsFix(bugUrl = "https://github.com/elastic/elasticsearch/issues/145492")
 public class AtanhTests extends AbstractScalarFunctionTestCase {
 
     // Canonical formula: https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#Definitions_in_terms_of_logarithms
@@ -46,57 +50,26 @@ public class AtanhTests extends AbstractScalarFunctionTestCase {
     public static Iterable<Object[]> parameters() {
         List<TestCaseSupplier> suppliers = new ArrayList<>();
 
-        suppliers.add(
-            new TestCaseSupplier(
-                "atanh(0)",
-                List.of(DataType.DOUBLE),
-                () -> new TestCaseSupplier.TestCase(
-                    List.of(new TestCaseSupplier.TypedData(0.0, DataType.DOUBLE, "arg")),
-                    "AtanhEvaluator[val=Attribute[channel=0]]",
-                    DataType.DOUBLE,
-                    equalTo(0.0)
-                )
-            )
-        );
-
-        suppliers.add(
-            new TestCaseSupplier(
-                "atanh(0.5)",
-                List.of(DataType.DOUBLE),
-                () -> new TestCaseSupplier.TestCase(
-                    List.of(new TestCaseSupplier.TypedData(0.5, DataType.DOUBLE, "arg")),
-                    "AtanhEvaluator[val=Attribute[channel=0]]",
-                    DataType.DOUBLE,
-                    closeTo(canonicalAtanh(0.5), Math.ulp(canonicalAtanh(0.5)))
-                )
-            )
-        );
-
-        suppliers.add(
-            new TestCaseSupplier(
-                "atanh(-0.5)",
-                List.of(DataType.DOUBLE),
-                () -> new TestCaseSupplier.TestCase(
-                    List.of(new TestCaseSupplier.TypedData(-0.5, DataType.DOUBLE, "arg")),
-                    "AtanhEvaluator[val=Attribute[channel=0]]",
-                    DataType.DOUBLE,
-                    closeTo(canonicalAtanh(-0.5), Math.ulp(canonicalAtanh(-0.5)))
-                )
-            )
-        );
-
-        suppliers.add(
-            new TestCaseSupplier(
-                "atanh(0.9)",
-                List.of(DataType.DOUBLE),
-                () -> new TestCaseSupplier.TestCase(
-                    List.of(new TestCaseSupplier.TypedData(0.9, DataType.DOUBLE, "arg")),
-                    "AtanhEvaluator[val=Attribute[channel=0]]",
-                    DataType.DOUBLE,
-                    closeTo(canonicalAtanh(0.9), Math.ulp(canonicalAtanh(0.9)))
-                )
-            )
-        );
+        UnaryTestCaseHelper helper = unary().evaluatorToString("AtanhEvaluator[val=%0]").expectedOutputType(DataType.DOUBLE);
+        helper.expectedFromDouble(d -> d).castingToDouble(0, 0, true, suppliers);
+        helper.expectedFromDouble(d -> {
+            double canonical = canonicalAtanh(d);
+            double err = Math.ulp(canonical) * 2;
+            // Our canonical implementation isn't 100% in line with the real one. That's ok.
+            if (Math.abs(d) > 0.94) {
+                err *= 2;
+            }
+            if (Math.abs(d) > 0.98) {
+                err *= 8;
+            }
+            if (Math.abs(d) > 0.998) {
+                err *= 4;
+            }
+            if (Math.abs(d) > 0.9998) {
+                err = 0.0001;
+            }
+            return closeTo(canonical, err);
+        }).castingToDouble(Math.nextUp(-1), Math.nextDown(1), false, suppliers);
 
         // Out of range
         suppliers.add(
@@ -128,35 +101,13 @@ public class AtanhTests extends AbstractScalarFunctionTestCase {
             )
         );
 
-        // Out of range
-        suppliers.addAll(
-            TestCaseSupplier.forUnaryCastingToDouble(
-                "AtanhEvaluator",
-                "val",
-                k -> null,
-                1.0000001d,
-                Double.POSITIVE_INFINITY,
-                List.of(
-                    "Line 1:1: evaluation of [source] failed, treating result as null. Only first 20 failures recorded.",
-                    "Line 1:1: java.lang.ArithmeticException: Atanh input out of range"
-                )
-            )
+        UnaryTestCaseHelper outOfRange = helper.expectNullAndWarnings(
+            o -> List.of("Line 1:1: java.lang.ArithmeticException: Atanh input out of range")
         );
-
-        // Out of range
-        suppliers.addAll(
-            TestCaseSupplier.forUnaryCastingToDouble(
-                "AtanhEvaluator",
-                "val",
-                k -> null,
-                Double.NEGATIVE_INFINITY,
-                -1.0000001d,
-                List.of(
-                    "Line 1:1: evaluation of [source] failed, treating result as null. Only first 20 failures recorded.",
-                    "Line 1:1: java.lang.ArithmeticException: Atanh input out of range"
-                )
-            )
-        );
+        outOfRange.castingToDouble(1.0, 1.0, false, suppliers);
+        outOfRange.castingToDouble(-1.0, -1.0, false, suppliers);
+        outOfRange.castingToDouble(Math.nextUp(1.0), Double.POSITIVE_INFINITY, false, suppliers);
+        outOfRange.castingToDouble(Double.NEGATIVE_INFINITY, Math.nextDown(-1.0), false, suppliers);
         return parameterSuppliersFromTypedDataWithDefaultChecks(true, suppliers);
     }
 

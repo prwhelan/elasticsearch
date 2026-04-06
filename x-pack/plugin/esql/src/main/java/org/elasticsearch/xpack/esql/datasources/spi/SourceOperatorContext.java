@@ -9,10 +9,14 @@ package org.elasticsearch.xpack.esql.datasources.spi;
 
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
-import org.elasticsearch.xpack.esql.datasources.FileSet;
+import org.elasticsearch.xpack.esql.core.util.Check;
+import org.elasticsearch.xpack.esql.datasources.ExternalSliceQueue;
 
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executor;
 
 /**
@@ -40,30 +44,36 @@ public record SourceOperatorContext(
     List<Attribute> attributes,
     int batchSize,
     int maxBufferSize,
+    int rowLimit,
     Executor executor,
     Map<String, Object> config,
     Map<String, Object> sourceMetadata,
     Object pushedFilter,
-    FileSet fileSet,
-    @Nullable ExternalSplit split
+    FileList fileList,
+    @Nullable ExternalSplit split,
+    Set<String> partitionColumnNames,
+    @Nullable ExternalSliceQueue sliceQueue,
+    int parsingParallelism
 ) {
     public SourceOperatorContext {
-        if (path == null) {
-            throw new IllegalArgumentException("path cannot be null");
-        }
-        if (executor == null) {
-            throw new IllegalArgumentException("executor cannot be null");
-        }
+        Check.notNull(path, "path cannot be null");
+        Check.notNull(executor, "executor cannot be null");
         projectedColumns = projectedColumns != null ? List.copyOf(projectedColumns) : List.of();
         attributes = attributes != null ? List.copyOf(attributes) : List.of();
         config = config != null ? Map.copyOf(config) : Map.of();
         sourceMetadata = sourceMetadata != null ? Map.copyOf(sourceMetadata) : Map.of();
+        partitionColumnNames = partitionColumnNames != null && partitionColumnNames.isEmpty() == false
+            ? Collections.unmodifiableSet(new LinkedHashSet<>(partitionColumnNames))
+            : Set.of();
 
         if (batchSize <= 0) {
             throw new IllegalArgumentException("batchSize must be positive, got: " + batchSize);
         }
         if (maxBufferSize <= 0) {
             throw new IllegalArgumentException("maxBufferSize must be positive, got: " + maxBufferSize);
+        }
+        if (parsingParallelism < 1) {
+            throw new IllegalArgumentException("parsingParallelism must be >= 1, got: " + parsingParallelism);
         }
     }
 
@@ -78,7 +88,8 @@ public record SourceOperatorContext(
         Map<String, Object> config,
         Map<String, Object> sourceMetadata,
         Object pushedFilter,
-        FileSet fileSet
+        FileList fileList,
+        @Nullable ExternalSplit split
     ) {
         this(
             sourceType,
@@ -87,12 +98,49 @@ public record SourceOperatorContext(
             attributes,
             batchSize,
             maxBufferSize,
+            FormatReader.NO_LIMIT,
             executor,
             config,
             sourceMetadata,
             pushedFilter,
-            fileSet,
-            null
+            fileList,
+            split,
+            null,
+            null,
+            1
+        );
+    }
+
+    public SourceOperatorContext(
+        String sourceType,
+        StoragePath path,
+        List<String> projectedColumns,
+        List<Attribute> attributes,
+        int batchSize,
+        int maxBufferSize,
+        Executor executor,
+        Map<String, Object> config,
+        Map<String, Object> sourceMetadata,
+        Object pushedFilter,
+        FileList fileList
+    ) {
+        this(
+            sourceType,
+            path,
+            projectedColumns,
+            attributes,
+            batchSize,
+            maxBufferSize,
+            FormatReader.NO_LIMIT,
+            executor,
+            config,
+            sourceMetadata,
+            pushedFilter,
+            fileList,
+            null,
+            null,
+            null,
+            1
         );
     }
 
@@ -115,12 +163,16 @@ public record SourceOperatorContext(
             attributes,
             batchSize,
             maxBufferSize,
+            FormatReader.NO_LIMIT,
             executor,
             config,
             sourceMetadata,
             pushedFilter,
             null,
-            null
+            null,
+            null,
+            null,
+            1
         );
     }
 
@@ -134,7 +186,24 @@ public record SourceOperatorContext(
         Executor executor,
         Map<String, Object> config
     ) {
-        this(sourceType, path, projectedColumns, attributes, batchSize, maxBufferSize, executor, config, Map.of(), null, null, null);
+        this(
+            sourceType,
+            path,
+            projectedColumns,
+            attributes,
+            batchSize,
+            maxBufferSize,
+            FormatReader.NO_LIMIT,
+            executor,
+            config,
+            Map.of(),
+            null,
+            null,
+            null,
+            null,
+            null,
+            1
+        );
     }
 
     public static Builder builder() {
@@ -148,12 +217,16 @@ public record SourceOperatorContext(
         private List<Attribute> attributes;
         private int batchSize = 1000;
         private int maxBufferSize = 10;
+        private int rowLimit = FormatReader.NO_LIMIT;
         private Executor executor;
         private Map<String, Object> config;
         private Map<String, Object> sourceMetadata;
         private Object pushedFilter;
-        private FileSet fileSet;
+        private FileList fileList;
         private ExternalSplit split;
+        private Set<String> partitionColumnNames;
+        private ExternalSliceQueue sliceQueue;
+        private int parsingParallelism = 1;
 
         public Builder sourceType(String sourceType) {
             this.sourceType = sourceType;
@@ -185,6 +258,11 @@ public record SourceOperatorContext(
             return this;
         }
 
+        public Builder rowLimit(int rowLimit) {
+            this.rowLimit = rowLimit;
+            return this;
+        }
+
         public Builder executor(Executor executor) {
             this.executor = executor;
             return this;
@@ -205,13 +283,28 @@ public record SourceOperatorContext(
             return this;
         }
 
-        public Builder fileSet(FileSet fileSet) {
-            this.fileSet = fileSet;
+        public Builder fileList(FileList fileList) {
+            this.fileList = fileList;
             return this;
         }
 
         public Builder split(ExternalSplit split) {
             this.split = split;
+            return this;
+        }
+
+        public Builder partitionColumnNames(Set<String> partitionColumnNames) {
+            this.partitionColumnNames = partitionColumnNames;
+            return this;
+        }
+
+        public Builder sliceQueue(ExternalSliceQueue sliceQueue) {
+            this.sliceQueue = sliceQueue;
+            return this;
+        }
+
+        public Builder parsingParallelism(int parsingParallelism) {
+            this.parsingParallelism = parsingParallelism;
             return this;
         }
 
@@ -223,12 +316,16 @@ public record SourceOperatorContext(
                 attributes,
                 batchSize,
                 maxBufferSize,
+                rowLimit,
                 executor,
                 config,
                 sourceMetadata,
                 pushedFilter,
-                fileSet,
-                split
+                fileList,
+                split,
+                partitionColumnNames,
+                sliceQueue,
+                parsingParallelism
             );
         }
     }

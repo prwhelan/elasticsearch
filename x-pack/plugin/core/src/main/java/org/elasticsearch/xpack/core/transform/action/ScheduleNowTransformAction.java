@@ -66,10 +66,6 @@ public class ScheduleNowTransformAction extends ActionType<ScheduleNowTransformA
             }
         }
 
-        public static Request fromXContent(final String id, final TimeValue timeout, final boolean defer) {
-            return new Request(id, timeout, defer);
-        }
-
         @Override
         public ActionRequestValidationException validate() {
             if (Metadata.ALL.equals(id)) {

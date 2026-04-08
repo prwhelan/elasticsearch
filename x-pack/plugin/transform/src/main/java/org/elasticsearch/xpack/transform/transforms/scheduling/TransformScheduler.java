@@ -256,7 +256,7 @@ public final class TransformScheduler {
      * @param transformId id of the transform to schedule now
      */
     public void scheduleNow(String transformId) {
-        scheduleNow(transformId, TimeValue.ZERO);
+        scheduleWithDelay(transformId, TimeValue.ZERO);
     }
 
     /**
@@ -266,7 +266,7 @@ public final class TransformScheduler {
      * @param transformId id of the transform to schedule
      * @param deferDuration how long from now to defer the scheduling
      */
-    public void scheduleNow(String transformId, TimeValue deferDuration) {
+    public void scheduleWithDelay(String transformId, TimeValue deferDuration) {
         logger.trace("[{}] schedule_now transform with defer [{}]", transformId, deferDuration);
         long currentTimeMillis = clock.millis();
         long nextScheduledTimeMillis = currentTimeMillis + deferDuration.millis();
@@ -309,6 +309,7 @@ public final class TransformScheduler {
      * @param transformId id of the transform
      * @return next scheduled time in epoch millis, or {@code null}
      */
+    // @VisibleForTesting
     public Long getNextScheduledTimeMillis(String transformId) {
         return scheduledTasks.listScheduledTasks()
             .stream()

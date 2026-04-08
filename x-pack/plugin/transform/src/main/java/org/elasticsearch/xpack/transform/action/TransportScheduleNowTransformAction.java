@@ -19,8 +19,8 @@ import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.tasks.TransportTasksAction;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.service.ClusterService;
+import org.elasticsearch.common.logging.HeaderWarning;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
-import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.injection.guice.Inject;
 import org.elasticsearch.persistent.PersistentTasksCustomMetadata;
 import org.elasticsearch.rest.RestStatus;
@@ -29,6 +29,7 @@ import org.elasticsearch.tasks.Task;
 import org.elasticsearch.transport.ActionNotFoundTransportException;
 import org.elasticsearch.transport.TransportService;
 import org.elasticsearch.xpack.core.XPackPlugin;
+import org.elasticsearch.xpack.core.transform.TransformMessages;
 import org.elasticsearch.xpack.core.transform.TransformMetadata;
 import org.elasticsearch.xpack.core.transform.action.ScheduleNowTransformAction;
 import org.elasticsearch.xpack.core.transform.action.ScheduleNowTransformAction.Request;
@@ -136,11 +137,15 @@ public class TransportScheduleNowTransformAction extends TransportTasksAction<Tr
         }
         if (request.defer()) {
             transformConfigManager.getTransformConfiguration(request.getId(), listener.delegateFailureAndWrap((l, config) -> {
-                TimeValue deferDuration = TimeValue.ZERO;
                 if (config.getSyncConfig() instanceof TimeSyncConfig timeSyncConfig) {
-                    deferDuration = timeSyncConfig.getDelay();
+                    var deferDuration = timeSyncConfig.getDelay();
+                    transformScheduler.scheduleWithDelay(request.getId(), deferDuration);
+                } else {
+                    var incompatibleWarning = TransformMessages.getMessage(TransformMessages.REST_WARN_NO_TRANSFORM_NODES, request.getId());
+                    logger.warn(incompatibleWarning);
+                    HeaderWarning.addWarning(incompatibleWarning);
+                    transformScheduler.scheduleNow(request.getId());
                 }
-                transformScheduler.scheduleNow(request.getId(), deferDuration);
                 l.onResponse(Response.TRUE);
             }));
         } else {

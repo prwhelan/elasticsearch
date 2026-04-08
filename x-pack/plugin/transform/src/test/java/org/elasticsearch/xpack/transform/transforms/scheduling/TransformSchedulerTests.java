@@ -240,7 +240,7 @@ public class TransformSchedulerTests extends ESTestCase {
         transformScheduler.stop();
     }
 
-    public void testScheduleNowWithDefer() {
+    public void testScheduleWithDelayWithDefer() {
         String transformId = "test-schedule-now-with-defer";
         TimeValue frequency = TimeValue.timeValueHours(1);
         TimeValue deferDuration = TimeValue.timeValueSeconds(30);
@@ -256,7 +256,7 @@ public class TransformSchedulerTests extends ESTestCase {
         clock.advanceTimeBy(Duration.ofMinutes(10));
 
         // Schedule with a defer duration; the task should not be triggered immediately
-        transformScheduler.scheduleNow(transformId, deferDuration);
+        transformScheduler.scheduleWithDelay(transformId, deferDuration);
         assertThat(events, hasSize(1));
         long expectedNextTime = 10 * 60 * 1000L + deferDuration.millis();
         assertThat(

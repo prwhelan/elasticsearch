@@ -61,7 +61,7 @@ public class MachineLearningUsageTransportActionTests extends ESTestCase {
         var deploymentConfig = TrainedModelConfigTests.createTestInstance("id1").build();
         var stats = new GetTrainedModelsStatsAction.Response.TrainedModelStats(
             "id1",
-            null,
+            null, // set modelSizeStats as null
             GetTrainedModelsStatsActionResponseTests.randomIngestStats(),
             randomIntBetween(0, 10),
             null,

@@ -62,16 +62,16 @@ capability is provided by a plugin implementing the `DataSourcePlugin` interface
 public interface DataSourcePlugin {
     // Storage providers for accessing data (S3, GCS, Azure, HTTP)
     Map<String, StorageProviderFactory> storageProviders(Settings settings);
-    
+
     // Format readers for parsing data files (Parquet, CSV, ORC)
     Map<String, FormatReaderFactory> formatReaders(Settings settings);
-    
+
     // Table catalog connectors (Iceberg, Delta Lake)
     Map<String, TableCatalogFactory> tableCatalogs(Settings settings);
-    
+
     // Custom operator factories for complex datasources
     Map<String, SourceOperatorFactoryProvider> operatorFactories(Settings settings);
-    
+
     // Filter pushdown support for predicate pushdown optimization
     Map<String, FilterPushdownSupport> filterPushdownSupport(Settings settings);
 }
@@ -85,6 +85,7 @@ public interface DataSourcePlugin {
 | **esql-datasource-parquet** | Parquet file format support | Parquet format reader |
 | **esql-datasource-s3** | AWS S3 storage support | S3 storage provider (s3://, s3a://, s3n://) |
 | **esql-datasource-gcs** | Google Cloud Storage support | GCS storage provider (gs://) |
+| **esql-datasource-azure** | Azure Blob Storage support | Azure storage provider (wasbs://, wasb://) |
 | **esql-datasource-iceberg** | Apache Iceberg table support | Iceberg table catalog, Arrow vectorized reading |
 
 ### Plugin Discovery
@@ -125,6 +126,7 @@ public interface StorageProvider extends Closeable {
 **Plugin Implementations:**
 - `S3StorageProvider` - AWS S3 access (in esql-datasource-s3)
 - `GcsStorageProvider` - Google Cloud Storage access (in esql-datasource-gcs)
+- `AzureStorageProvider` - Azure Blob Storage access (in esql-datasource-azure)
 
 ### StorageObject
 
@@ -297,10 +299,10 @@ public class OrcFormatReader implements FormatReader {
         // Use ORC library to parse data
         return new OrcBatchIterator(stream, projectedColumns, batchSize);
     }
-    
+
     @Override
     public String formatName() { return "orc"; }
-    
+
     @Override
     public List<String> fileExtensions() { return List.of(".orc"); }
 }
@@ -333,6 +335,11 @@ x-pack/plugin/
 │   └── src/main/java/.../gcs/
 │       ├── GcsDataSourcePlugin.java
 │       └── GcsStorageProvider.java
+│
+├── esql-datasource-azure/             # Azure Blob Storage plugin
+│   └── src/main/java/.../azure/
+│       ├── AzureDataSourcePlugin.java
+│       └── AzureStorageProvider.java
 │
 └── esql-datasource-iceberg/           # Iceberg table catalog plugin
     ├── build.gradle                   # Iceberg, Arrow, AWS SDK dependencies
@@ -371,7 +378,7 @@ Run tests:
 
 ## Future Enhancements
 
-1. **Additional Storage Providers** - HDFS, Azure Blob
+1. **Additional Storage Providers** - HDFS
 2. **Additional Format Readers** - ORC, Avro, JSON Lines
 3. **Additional Table Catalogs** - Delta Lake, Apache Hudi
 4. **Performance Optimizations** - File splitting, parallel reads, caching

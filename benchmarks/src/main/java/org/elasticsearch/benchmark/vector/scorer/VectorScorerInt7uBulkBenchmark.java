@@ -16,6 +16,7 @@ import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.util.hnsw.RandomVectorScorer;
 import org.apache.lucene.util.hnsw.UpdateableRandomVectorScorer;
 import org.apache.lucene.util.quantization.QuantizedByteVectorValues;
+import org.elasticsearch.benchmark.Utils;
 import org.elasticsearch.core.IOUtils;
 import org.elasticsearch.simdvec.VectorScorerFactory;
 import org.elasticsearch.simdvec.VectorSimilarityType;
@@ -49,8 +50,8 @@ import static org.elasticsearch.benchmark.vector.scorer.BenchmarkUtils.quantized
 import static org.elasticsearch.benchmark.vector.scorer.BenchmarkUtils.randomInt7BytesBetween;
 import static org.elasticsearch.benchmark.vector.scorer.BenchmarkUtils.supportsHeapSegments;
 import static org.elasticsearch.benchmark.vector.scorer.BenchmarkUtils.writeInt7VectorData;
-import static org.elasticsearch.benchmark.vector.scorer.ScalarOperations.dotProduct;
-import static org.elasticsearch.benchmark.vector.scorer.ScalarOperations.squareDistance;
+import static org.elasticsearch.nativeaccess.jdk.ScalarOperations.dotProduct;
+import static org.elasticsearch.nativeaccess.jdk.ScalarOperations.squareDistance;
 
 /**
  * Benchmark that compares bulk scoring of various scalar quantized vector similarity function
@@ -67,7 +68,7 @@ import static org.elasticsearch.benchmark.vector.scorer.ScalarOperations.squareD
 public class VectorScorerInt7uBulkBenchmark {
 
     static {
-        BenchmarkUtils.configureBenchmarkLogging();
+        Utils.configureBenchmarkLogging();
     }
 
     @Param({ "1024" })
@@ -88,7 +89,7 @@ public class VectorScorerInt7uBulkBenchmark {
     @Param({ "16", "32", "64", "256", "1024" })
     public int bulkSize;
 
-    @Param({ "SCALAR", "LUCENE", "NATIVE" })
+    @Param
     public VectorImplementation implementation;
 
     @Param({ "DOT_PRODUCT", "EUCLIDEAN" })
@@ -114,7 +115,7 @@ public class VectorScorerInt7uBulkBenchmark {
         public float score(int ordinal) throws IOException {
             var vec2 = values.vectorValue(ordinal);
             var vec2CorrectionConstant = values.getScoreCorrectionConstant(ordinal);
-            int dotProduct = dotProduct(queryVector, vec2);
+            float dotProduct = dotProduct(queryVector, vec2);
             float adjustedDistance = dotProduct * scoreCorrectionConstant + queryVectorCorrectionConstant + vec2CorrectionConstant;
             return (1 + adjustedDistance) / 2;
         }
@@ -145,7 +146,7 @@ public class VectorScorerInt7uBulkBenchmark {
         @Override
         public float score(int ordinal) throws IOException {
             var vec2 = values.vectorValue(ordinal);
-            int squareDistance = squareDistance(queryVector, vec2);
+            float squareDistance = squareDistance(queryVector, vec2);
             float adjustedDistance = squareDistance * scoreCorrectionConstant;
             return 1 / (1f + adjustedDistance);
         }

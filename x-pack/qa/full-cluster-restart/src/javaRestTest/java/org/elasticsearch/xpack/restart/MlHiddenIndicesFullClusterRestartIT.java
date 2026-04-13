@@ -146,10 +146,9 @@ public class MlHiddenIndicesFullClusterRestartIT extends AbstractXpackFullCluste
                 "job_id": "%s",
                 "analysis_config": {
                     "bucket_span": "10m",
-                    "detectors": [{
-                        "function": "metric",
-                        "field_name": "responsetime"
-                    }]
+                "detectors": [{
+                    "function": "count"
+                }]
                 },
                 "data_description": {}
             }""", jobId);

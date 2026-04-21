@@ -229,15 +229,6 @@ tests:
 - class: org.elasticsearch.xpack.entsearch.EnterpriseSearchRestIT
   method: test {p0=entsearch/rules/40_rule_query_search/Perform a rule query with an organic query that must be rewritten to another query type}
   issue: https://github.com/elastic/elasticsearch/issues/146106
-- class: org.elasticsearch.xpack.esql.qa.multi_node.EsqlSpecIT
-  method: test {csv-spec:embedding.embedding with multiple knn queries in fork}
-  issue: https://github.com/elastic/elasticsearch/issues/146130
-- class: org.elasticsearch.xpack.esql.qa.single_node.EsqlSpecIT
-  method: test {csv-spec:embedding.embedding with multiple knn queries in fork}
-  issue: https://github.com/elastic/elasticsearch/issues/146130
-- class: org.elasticsearch.xpack.esql.qa.single_node.EsqlSpecForceStoredLoadingIT
-  method: test {csv-spec:embedding.embedding with multiple knn queries in fork}
-  issue: https://github.com/elastic/elasticsearch/issues/146137
 - class: org.elasticsearch.backwards.MixedClusterClientYamlTestSuiteIT
   method: test {p0=tsdb/25_id_generation/*}
   issue: https://github.com/elastic/elasticsearch/issues/146177
@@ -247,6 +238,9 @@ tests:
 - class: org.elasticsearch.xpack.esql.qa.single_node.GenerativeUnmappedLoadIT
   method: test
   issue: https://github.com/elastic/elasticsearch/issues/145900
+- class: org.elasticsearch.xpack.esql.qa.single_node.GenerativePromQLIT
+  method: test
+  issue: https://github.com/elastic/elasticsearch/issues/146923
 - class: org.elasticsearch.xpack.eql.qa.ccs_rolling_upgrade.EqlCcsRollingUpgradeIT
   method: testSequences
   issue: https://github.com/elastic/elasticsearch/issues/146263

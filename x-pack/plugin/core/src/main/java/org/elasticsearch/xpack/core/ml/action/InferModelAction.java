@@ -77,7 +77,7 @@ public class InferModelAction extends ActionType<InferModelAction.Response> {
         }
 
         public static final TimeValue DEFAULT_TIMEOUT_FOR_API = TimeValue.timeValueSeconds(10);
-        public static final TimeValue DEFAULT_TIMEOUT_FOR_INGEST = TimeValue.MAX_VALUE;
+        public static final TimeValue DEFAULT_TIMEOUT_FOR_INGEST = TimeValue.timeValueHours(2);
 
         private final String id;
         private final List<Map<String, Object>> objectsToInfer;

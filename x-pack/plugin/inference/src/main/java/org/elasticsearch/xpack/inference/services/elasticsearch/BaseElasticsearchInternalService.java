@@ -42,6 +42,7 @@ import org.elasticsearch.xpack.inference.telemetry.InferenceTimer;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Consumer;
 
@@ -278,8 +279,11 @@ public abstract class BaseElasticsearchInternalService implements InferenceServi
     }
 
     private void preferredVariantFromPlatformArchitecture(ActionListener<PreferredModelVariant> preferredVariantListener) {
-        // Find the cluster platform as the service may need that
-        // information when creating the model
+        var configuredArchitectures = clusterService.getClusterSettings().get(MachineLearningField.MODEL_PLATFORM_ARCHITECTURES);
+        if (configuredArchitectures.isEmpty() == false) {
+            preferredVariantListener.onResponse(preferredModelVariantFromArchitectures(Set.copyOf(configuredArchitectures)));
+            return;
+        }
         MlPlatformArchitecturesUtil.getMlNodesArchitecturesSet(
             preferredVariantListener.delegateFailureAndWrap((delegate, architectures) -> {
                 if (architectures.isEmpty() && isClusterInElasticCloud()) {
@@ -287,17 +291,19 @@ public abstract class BaseElasticsearchInternalService implements InferenceServi
                     // However, in Elastic cloud ml nodes run on Linux x86
                     delegate.onResponse(PreferredModelVariant.LINUX_X86_OPTIMIZED);
                 } else {
-                    boolean homogenous = architectures.size() == 1;
-                    if (homogenous && architectures.iterator().next().equals("linux-x86_64")) {
-                        delegate.onResponse(PreferredModelVariant.LINUX_X86_OPTIMIZED);
-                    } else {
-                        delegate.onResponse(PreferredModelVariant.PLATFORM_AGNOSTIC);
-                    }
+                    delegate.onResponse(preferredModelVariantFromArchitectures(architectures));
                 }
             }),
             client,
             inferenceExecutor
         );
+    }
+
+    static PreferredModelVariant preferredModelVariantFromArchitectures(Set<String> architectures) {
+        if (architectures.size() == 1 && architectures.iterator().next().equals("linux-x86_64")) {
+            return PreferredModelVariant.LINUX_X86_OPTIMIZED;
+        }
+        return PreferredModelVariant.PLATFORM_AGNOSTIC;
     }
 
     protected ClusterService getClusterService() {

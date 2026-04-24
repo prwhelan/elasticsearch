@@ -1815,6 +1815,34 @@ public class ElasticsearchInternalServiceTests extends InferenceServiceTestCase 
         }
     }
 
+    public void testPreferredModelVariantFromArchitectures_SingleLinuxX86() {
+        assertEquals(
+            BaseElasticsearchInternalService.PreferredModelVariant.LINUX_X86_OPTIMIZED,
+            BaseElasticsearchInternalService.preferredModelVariantFromArchitectures(Set.of("linux-x86_64"))
+        );
+    }
+
+    public void testPreferredModelVariantFromArchitectures_SingleLinuxAarch64() {
+        assertEquals(
+            BaseElasticsearchInternalService.PreferredModelVariant.PLATFORM_AGNOSTIC,
+            BaseElasticsearchInternalService.preferredModelVariantFromArchitectures(Set.of("linux-aarch64"))
+        );
+    }
+
+    public void testPreferredModelVariantFromArchitectures_MixedArchitectures() {
+        assertEquals(
+            BaseElasticsearchInternalService.PreferredModelVariant.PLATFORM_AGNOSTIC,
+            BaseElasticsearchInternalService.preferredModelVariantFromArchitectures(Set.of("linux-x86_64", "linux-aarch64"))
+        );
+    }
+
+    public void testPreferredModelVariantFromArchitectures_EmptyArchitectures() {
+        assertEquals(
+            BaseElasticsearchInternalService.PreferredModelVariant.PLATFORM_AGNOSTIC,
+            BaseElasticsearchInternalService.preferredModelVariantFromArchitectures(Set.of())
+        );
+    }
+
     public void testIsDefaultId() {
         var service = createService(mock(Client.class));
         assertTrue(service.isDefaultId(".elser-2-elasticsearch"));

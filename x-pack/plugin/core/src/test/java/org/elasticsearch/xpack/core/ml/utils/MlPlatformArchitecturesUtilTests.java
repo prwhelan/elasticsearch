@@ -199,9 +199,7 @@ public class MlPlatformArchitecturesUtilTests extends ESTestCase {
 
     public void testResolveEffectiveArchitectures_SettingConfiguredMultiple() throws InterruptedException {
         var clusterSettings = new ClusterSettings(
-            Settings.builder()
-                .putList(MachineLearningField.MODEL_PLATFORM_ARCHITECTURES.getKey(), "linux-x86_64", "linux-aarch64")
-                .build(),
+            Settings.builder().putList(MachineLearningField.MODEL_PLATFORM_ARCHITECTURES.getKey(), "linux-x86_64", "linux-aarch64").build(),
             Set.of(MachineLearningField.MODEL_PLATFORM_ARCHITECTURES)
         );
 

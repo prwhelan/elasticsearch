@@ -211,7 +211,7 @@ public class TransportPutTransformAction extends AcknowledgedTransportMasterNode
                 l.onFailure(
                     new ElasticsearchStatusException(
                         TransformMessages.REST_PUT_FAILED_CREATING_TRANSFORM_INDEX,
-                        RestStatus.INTERNAL_SERVER_ERROR,
+                        RestStatus.SERVICE_UNAVAILABLE,
                         ExceptionsHelper.unwrapCause(e)
                     )
                 );

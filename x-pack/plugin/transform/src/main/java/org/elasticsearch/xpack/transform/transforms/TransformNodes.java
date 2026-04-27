@@ -145,6 +145,8 @@ public final class TransformNodes {
 
     /**
      * Check if cluster has at least 1 transform nodes.
+     *
+     * @return {@code true} if the cluster has no node with the transform role.
      */
     public static boolean hasNoTransformNodes(ClusterState clusterState) {
         return hasAnyTransformNode(clusterState.getNodes()) == false;

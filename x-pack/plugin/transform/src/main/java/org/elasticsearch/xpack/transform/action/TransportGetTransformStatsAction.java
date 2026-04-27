@@ -206,10 +206,7 @@ public class TransportGetTransformStatsAction extends TransportTasksAction<Trans
 
                 request.setExpandedIds(hitsAndIds.v2().v1());
                 final ProjectMetadata project = projectResolver.getProjectMetadata(clusterState);
-                final TransformNodeAssignments transformNodeAssignments = TransformNodes.transformTaskNodes(
-                    hitsAndIds.v2().v1(),
-                    project
-                );
+                final TransformNodeAssignments transformNodeAssignments = TransformNodes.transformTaskNodes(hitsAndIds.v2().v1(), project);
 
                 ActionListener<Response> doExecuteListener = ActionListener.wrap(response -> {
                     PersistentTasksCustomMetadata tasksInProgress = clusterState.getMetadata()
@@ -423,10 +420,7 @@ public class TransportGetTransformStatsAction extends TransportTasksAction<Trans
                             )
                         );
                     } else {
-                        final boolean transformPersistentTaskIsStillRunning = TransformTask.getTransformTask(
-                            stat.getId(),
-                            project
-                        ) != null;
+                        final boolean transformPersistentTaskIsStillRunning = TransformTask.getTransformTask(stat.getId(), project) != null;
                         allStateAndStats.add(
                             new TransformStats(
                                 stat.getId(),

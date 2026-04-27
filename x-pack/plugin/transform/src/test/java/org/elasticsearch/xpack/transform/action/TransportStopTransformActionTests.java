@@ -62,19 +62,11 @@ public class TransportStopTransformActionTests extends ESTestCase {
     public void testTaskStateValidationWithNoTasks() {
         Metadata.Builder metadata = Metadata.builder();
         ClusterState.Builder csBuilder = ClusterState.builder(new ClusterName("_name")).metadata(metadata);
-        TransportStopTransformAction.validateTaskState(
-            csBuilder.build().metadata().getDefaultProject(),
-            List.of("non-failed-task"),
-            false
-        );
+        TransportStopTransformAction.validateTaskState(csBuilder.build().metadata().getDefaultProject(), List.of("non-failed-task"), false);
 
         PersistentTasksCustomMetadata.Builder pTasksBuilder = PersistentTasksCustomMetadata.builder();
         csBuilder = ClusterState.builder(new ClusterName("_name")).metadata(buildMetadata(pTasksBuilder.build()));
-        TransportStopTransformAction.validateTaskState(
-            csBuilder.build().metadata().getDefaultProject(),
-            List.of("non-failed-task"),
-            false
-        );
+        TransportStopTransformAction.validateTaskState(csBuilder.build().metadata().getDefaultProject(), List.of("non-failed-task"), false);
     }
 
     public void testTaskStateValidationWithTransformTasks() {
@@ -88,11 +80,7 @@ public class TransportStopTransformActionTests extends ESTestCase {
             );
         ClusterState.Builder csBuilder = ClusterState.builder(new ClusterName("_name")).metadata(buildMetadata(pTasksBuilder.build()));
 
-        TransportStopTransformAction.validateTaskState(
-            csBuilder.build().metadata().getDefaultProject(),
-            List.of("non-failed-task"),
-            false
-        );
+        TransportStopTransformAction.validateTaskState(csBuilder.build().metadata().getDefaultProject(), List.of("non-failed-task"), false);
 
         // test again with a non failed task but this time it has internal state
         pTasksBuilder.updateTaskState(
@@ -101,11 +89,7 @@ public class TransportStopTransformActionTests extends ESTestCase {
         );
         csBuilder = ClusterState.builder(new ClusterName("_name")).metadata(buildMetadata(pTasksBuilder.build()));
 
-        TransportStopTransformAction.validateTaskState(
-            csBuilder.build().metadata().getDefaultProject(),
-            List.of("non-failed-task"),
-            false
-        );
+        TransportStopTransformAction.validateTaskState(csBuilder.build().metadata().getDefaultProject(), List.of("non-failed-task"), false);
 
         // test again with one failed task
         pTasksBuilder.addTask(

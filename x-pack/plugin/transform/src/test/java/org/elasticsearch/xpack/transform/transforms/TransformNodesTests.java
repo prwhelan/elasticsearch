@@ -128,7 +128,10 @@ public class TransformNodesTests extends ESTestCase {
         assertEquals(1, transformNodeAssignments.getStopped().size());
         assertTrue(transformNodeAssignments.getStopped().contains(transformIdStopped));
 
-        transformNodeAssignments = TransformNodes.transformTaskNodes(Arrays.asList(transformIdFoo, transformIdFailed), cs.metadata().getDefaultProject());
+        transformNodeAssignments = TransformNodes.transformTaskNodes(
+            Arrays.asList(transformIdFoo, transformIdFailed),
+            cs.metadata().getDefaultProject()
+        );
 
         assertEquals(1, transformNodeAssignments.getExecutorNodes().size());
         assertTrue(transformNodeAssignments.getExecutorNodes().contains("node-1"));
@@ -300,7 +303,10 @@ public class TransformNodesTests extends ESTestCase {
             .build();
         assertThat(TransformNodes.getAssignment("transform-1", clusterState.metadata().getDefaultProject()), is(nullValue()));
         assertThat(TransformNodes.getAssignment("transform-2", clusterState.metadata().getDefaultProject()), is(equalTo(assignment2)));
-        assertThat(TransformNodes.getAssignment("transform-3", clusterState.metadata().getDefaultProject()), is(equalTo(INITIAL_ASSIGNMENT)));
+        assertThat(
+            TransformNodes.getAssignment("transform-3", clusterState.metadata().getDefaultProject()),
+            is(equalTo(INITIAL_ASSIGNMENT))
+        );
     }
 
     private static ClusterState newClusterState(DiscoveryNodes nodes) {

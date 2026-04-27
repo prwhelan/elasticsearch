@@ -173,7 +173,7 @@ public class TransportPutTransformAction extends AcknowledgedTransportMasterNode
                     client,
                     config,
                     true,
-		    hasLinkedProjects.getAsBoolean(),
+                    hasLinkedProjects.getAsBoolean(),
                     ActionListener.wrap(
                         aVoid -> AuthorizationStatePersistenceUtils.persistAuthState(
                             settings,

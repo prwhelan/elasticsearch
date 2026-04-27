@@ -58,10 +58,7 @@ public class TransportPutTransformActionTests extends ESTestCase {
         when(client.threadPool()).thenReturn(threadPool);
 
         AtomicReference<Exception> capturedException = new AtomicReference<>();
-        ActionListener<Void> listener = ActionListener.<Void>wrap(
-            r -> fail("expected failure but got success"),
-            capturedException::set
-        );
+        ActionListener<Void> listener = ActionListener.<Void>wrap(r -> fail("expected failure but got success"), capturedException::set);
 
         // Replicate the delegateResponse wrapping from TransportPutTransformAction
         TransformInternalIndex.createLatestVersionedIndexIfRequired(

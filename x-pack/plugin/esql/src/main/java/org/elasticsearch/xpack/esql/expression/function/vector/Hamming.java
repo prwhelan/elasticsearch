@@ -10,6 +10,7 @@ package org.elasticsearch.xpack.esql.expression.function.vector;
 import org.apache.lucene.util.VectorUtil;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.io.stream.StreamInput;
+import org.elasticsearch.index.mapper.blockloader.BlockLoaderFunctionConfig;
 import org.elasticsearch.index.mapper.vectors.DenseVectorFieldMapper;
 import org.elasticsearch.xpack.esql.core.expression.Expression;
 import org.elasticsearch.xpack.esql.core.expression.function.scalar.BinaryScalarFunction;
@@ -18,6 +19,7 @@ import org.elasticsearch.xpack.esql.core.tree.Source;
 import org.elasticsearch.xpack.esql.expression.function.Example;
 import org.elasticsearch.xpack.esql.expression.function.FunctionAppliesTo;
 import org.elasticsearch.xpack.esql.expression.function.FunctionAppliesToLifecycle;
+import org.elasticsearch.xpack.esql.expression.function.FunctionDefinition;
 import org.elasticsearch.xpack.esql.expression.function.FunctionInfo;
 import org.elasticsearch.xpack.esql.expression.function.Param;
 
@@ -26,6 +28,7 @@ import java.io.IOException;
 public class Hamming extends VectorSimilarityFunction {
 
     public static final NamedWriteableRegistry.Entry ENTRY = new NamedWriteableRegistry.Entry(Expression.class, "Hamming", Hamming::new);
+    public static final FunctionDefinition DEFINITION = FunctionDefinition.def(Hamming.class).binary(Hamming::new).name("v_hamming");
     public static final DenseVectorFieldMapper.SimilarityFunction SIMILARITY_FUNCTION = new DenseVectorFieldMapper.SimilarityFunction() {
         @Override
         public float calculateSimilarity(byte[] leftVector, byte[] rightVector) {
@@ -35,6 +38,16 @@ public class Hamming extends VectorSimilarityFunction {
         @Override
         public float calculateSimilarity(float[] leftVector, float[] rightVector) {
             throw new UnsupportedOperationException("Hamming distance is not supported for float vectors");
+        }
+
+        @Override
+        public BlockLoaderFunctionConfig.Function function() {
+            return BlockLoaderFunctionConfig.Function.V_HAMMING;
+        }
+
+        @Override
+        public String toString() {
+            return "V_HAMMING";
         }
     };
     public static final DenseVectorFieldMapper.SimilarityFunction EVALUATOR_SIMILARITY_FUNCTION =
@@ -56,14 +69,21 @@ public class Hamming extends VectorSimilarityFunction {
                 }
                 return Hamming.calculateSimilarity(a, b);
             }
+
+            @Override
+            public BlockLoaderFunctionConfig.Function function() {
+                return BlockLoaderFunctionConfig.Function.V_HAMMING;
+            }
         };
 
     @FunctionInfo(
         returnType = "double",
-        preview = true,
         description = "Calculates the Hamming distance between two dense vectors.",
         examples = { @Example(file = "vector-hamming", tag = "vector-hamming") },
-        appliesTo = { @FunctionAppliesTo(lifeCycle = FunctionAppliesToLifecycle.PREVIEW, version = "9.2.0") }
+        appliesTo = {
+            @FunctionAppliesTo(lifeCycle = FunctionAppliesToLifecycle.PREVIEW, version = "9.3.0"),
+            @FunctionAppliesTo(lifeCycle = FunctionAppliesToLifecycle.GA, version = "9.4.0") },
+        depthOffset = 1  // So this appears as a subsection of vector similarity functions
     )
     public Hamming(
         Source source,

@@ -7,12 +7,15 @@
 
 package org.elasticsearch.compute.data;
 
+import org.apache.lucene.util.BytesRef;
+import org.elasticsearch.exponentialhistogram.BucketIterator;
 import org.elasticsearch.exponentialhistogram.ExponentialHistogram;
+import org.elasticsearch.index.mapper.BlockLoader;
 
 /**
  * A block that holds {@link ExponentialHistogram} values.
  */
-public sealed interface ExponentialHistogramBlock extends Block permits ConstantNullBlock, ExponentialHistogramArrayBlock {
+public sealed interface ExponentialHistogramBlock extends HistogramBlock permits ConstantNullBlock, ExponentialHistogramArrayBlock {
 
     /**
      * Returns the {@link ExponentialHistogram} value at the given index.
@@ -27,6 +30,16 @@ public sealed interface ExponentialHistogramBlock extends Block permits Constant
      */
     ExponentialHistogram getExponentialHistogram(int valueIndex, ExponentialHistogramScratch scratch);
 
+    /**
+     * Serializes the exponential histogram at the given index into the provided output, so that it can be read back
+     *  via {@link ExponentialHistogramBlockBuilder#deserializeAndAppend(SerializedInput)}.
+     *
+     * @param valueIndex
+     * @param out
+     * @param scratch
+     */
+    void serializeExponentialHistogram(int valueIndex, SerializedOutput out, BytesRef scratch);
+
     static boolean equals(ExponentialHistogramBlock blockA, ExponentialHistogramBlock blockB) {
         if (blockA == blockB) {
             return true;
@@ -40,6 +53,63 @@ public sealed interface ExponentialHistogramBlock extends Block permits Constant
                 case ExponentialHistogramArrayBlock b -> a.equalsAfterTypeCheck(b);
             };
         };
+    }
+
+    /**
+     * Builder for {@link ExponentialHistogramBlock}
+     */
+    sealed interface Builder extends Block.Builder, BlockLoader.ExponentialHistogramBuilder permits ExponentialHistogramBlockBuilder {
+
+        /**
+         * Appends the provided histogram to this builder.
+         */
+        Builder append(ExponentialHistogram histogram);
+
+        /**
+         * Appends a histogram from raw bucket iterators and summary statistics.
+         */
+        Builder append(
+            int scale,
+            BucketIterator negativeBuckets,
+            BucketIterator positiveBuckets,
+            double zeroThreshold,
+            long zeroCount,
+            long count,
+            double sum,
+            double min,
+            double max
+        );
+
+        /**
+         * Copy the values in {@code block} from the given positon into this builder.
+         */
+        Builder copyFrom(ExponentialHistogramBlock block, int position);
+
+        @Override
+        ExponentialHistogramBlock build();
+    }
+
+    /**
+     * Abstraction to use for writing individual values via {@link #serializeExponentialHistogram(int, SerializedOutput, BytesRef)}.
+     */
+    interface SerializedOutput {
+        void appendDouble(double value);
+
+        void appendLong(long value);
+
+        void appendBytesRef(BytesRef bytesRef);
+    }
+
+    /**
+     * Abstraction to use for reading individual serialized via
+     * {@link ExponentialHistogramBlockBuilder#deserializeAndAppend(SerializedInput)}.
+     */
+    interface SerializedInput {
+        double readDouble();
+
+        long readLong();
+
+        BytesRef readBytesRef(BytesRef scratch);
     }
 
 }

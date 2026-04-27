@@ -269,6 +269,8 @@ public final class RemoteClusterLicenseChecker {
      * {@code cluster_alias:index_name} and the cluster_alias is extracted (and expanded if it is a wildcard) for
      * each index name that represents a remote index. Exclusion patterns of the form {@code -cluster_alias:*} are
      * handled by removing the corresponding clusters from the result.
+     * Exclusions are applied to the complete set of
+     * included clusters regardless of their position in the list (order-independent).
      *
      * @param remoteClusters the aliases for remote clusters
      * @param indices        the collection of index names

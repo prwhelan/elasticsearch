@@ -16,8 +16,6 @@ teardown:
   - match: { defaults.anomaly_detectors.model_snapshot_retention_days: 10 }
   - match: { defaults.anomaly_detectors.daily_model_snapshot_retention_after_days: 1 }
   - match: { defaults.datafeeds.scroll_size: 1000 }
-  # model_platform_variant depends on the test machine architecture
-  - match: { defaults.model_platform_variant: "/linux-x86_64|platform_agnostic/" }
   - is_false: limits.max_model_memory_limit
   # We cannot assert an exact value for the next two as they will vary depending on the test machine
   - match: { limits.effective_max_model_memory_limit: "/\\d+[kmg]?b/" }
@@ -103,3 +101,13 @@ teardown:
   - match: { limits.effective_max_model_memory_limit: "1mb" }
   - match: { limits.total_ml_memory: "/\\d+mb/" }
   - match: { upgrade_mode: false }
+
+---
+"Test ml info model_platform_variant":
+  - requires:
+      cluster_features: ["ml.info.model_platform_variant"]
+      reason: "model_platform_variant added in 9.5"
+  - do:
+      ml.info: {}
+  # model_platform_variant depends on the test machine architecture
+  - match: { defaults.model_platform_variant: "/linux-x86_64|platform_agnostic/" }

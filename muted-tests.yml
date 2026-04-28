@@ -403,6 +403,9 @@ tests:
 - class: org.elasticsearch.search.sort.NestedSortBuilderTests
   method: testRewrite
   issue: https://github.com/elastic/elasticsearch/issues/147721
+- class: org.elasticsearch.search.runtime.StringScriptFieldTermQueryTests
+  method: testToString
+  issue: https://github.com/elastic/elasticsearch/issues/147727
 
 # Examples:
 #

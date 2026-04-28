@@ -676,8 +676,9 @@ public class SharedBlobCacheWarmingServiceIT extends AbstractStatelessPluginInte
             .put(SharedBlobCacheService.SHARED_CACHE_RANGE_SIZE_SETTING.getKey(), REGION_SIZE.getStringRep())
             .put(StatelessCommitService.STATELESS_UPLOAD_MAX_AMOUNT_COMMITS.getKey(), 10)
             .put(StatelessCommitService.STATELESS_UPLOAD_MAX_SIZE.getKey(), "1g")
-            // Fetch size must be smaller or equal to the minimized pre-warm range (default to 1/4 region size). See also ES-9185
-            .put(TRANSPORT_BLOB_READER_CHUNK_SIZE_SETTING.getKey(), ByteSizeValue.ofBytes(PAGE_SIZE))
+            // Match the VBCC transport chunk size with the pre-warm range so that each warming range is fetched with a single
+            // transport request, reducing the interleaving window where a mid-range flush can surface RAUE on a sibling gap.
+            .put(TRANSPORT_BLOB_READER_CHUNK_SIZE_SETTING.getKey(), REGION_SIZE.getStringRep())
             .put(disableIndexingDiskAndMemoryControllersNodeSettings())
             .build();
         final var indexNode = startMasterAndIndexNode(nodeSettings);
@@ -937,10 +938,9 @@ public class SharedBlobCacheWarmingServiceIT extends AbstractStatelessPluginInte
         searchNodeCacheService.noFreeRegionForWarming.set(true);
 
         // Warming is meant to fail and that's OK. Search shard recovery does not depend on it.
-        final var blockingWarmingService = getSharedBlobCacheWarmingService(searchNode);
-        blockingWarmingService.mustSucceed.set(false);
+        final var warmingService = getSharedBlobCacheWarmingService(searchNode);
         final PlainActionFuture<CompletedWarmingDetails> warmingCompletedFuture = new PlainActionFuture<>();
-        blockingWarmingService.addWarmingCompletedListener(warmingCompletedFuture);
+        warmingService.addWarmingCompletedListener(warmingCompletedFuture);
 
         final var stoppedLatch = new CountDownLatch(1);
         final var restartLatch = new CountDownLatch(1);
@@ -955,8 +955,6 @@ public class SharedBlobCacheWarmingServiceIT extends AbstractStatelessPluginInte
                         final var e = expectThrows(Exception.class, () -> warmingCompletedFuture.actionGet(30, TimeUnit.SECONDS));
                         logger.info("--> warming failed as expected", e);
                         assertThat(ExceptionsHelper.unwrap(e, NodeNotConnectedException.class, IOException.class), notNullValue());
-                        // Future search shard warming after indexing node comes back should succeed
-                        blockingWarmingService.mustSucceed.set(true);
                         safeAwait(restartLatch);
                         logger.info("--> continue to restart the indexing node");
                         return super.onNodeStopped(nodeName);
@@ -1288,8 +1286,8 @@ public class SharedBlobCacheWarmingServiceIT extends AbstractStatelessPluginInte
         }));
     }
 
-    private static BlockingSharedBlobCacheWarmingService getSharedBlobCacheWarmingService(String node) {
-        return (BlockingSharedBlobCacheWarmingService) getTestStatelessPlugin(node).getSharedBlobCacheWarmingService();
+    private static ObservableSharedBlobCacheWarmingService getSharedBlobCacheWarmingService(String node) {
+        return (ObservableSharedBlobCacheWarmingService) getTestStatelessPlugin(node).getSharedBlobCacheWarmingService();
     }
 
     private static TestStatelessPlugin getTestStatelessPlugin(String node) {
@@ -1313,7 +1311,7 @@ public class SharedBlobCacheWarmingServiceIT extends AbstractStatelessPluginInte
             ClusterSettings clusterSettings,
             WarmingRatioProvider warmingRatioProvider
         ) {
-            return new BlockingSharedBlobCacheWarmingService(
+            return new ObservableSharedBlobCacheWarmingService(
                 cacheService,
                 threadPool,
                 telemetryProvider,
@@ -1378,15 +1376,22 @@ public class SharedBlobCacheWarmingServiceIT extends AbstractStatelessPluginInte
      */
     private record CompletedWarmingDetails(Type type, StatelessCompoundCommit commit) {}
 
-    private static class BlockingSharedBlobCacheWarmingService extends SharedBlobCacheWarmingService {
+    /**
+     * Test subclass of {@link SharedBlobCacheWarmingService} that exposes listener-based hooks for observing warming start and
+     * completion. Unlike a blocking wrapper, this subclass does not await warming inside {@link #warmCache} or
+     * {@link #warmCacheMerge} — it mirrors production's async semantics so callers that pass {@link ActionListener#noop()}
+     * (e.g. the fire-and-forget branch of {@code warmCacheForSearchShardRecovery}) are not converted into blocking calls.
+     * Tests that need "warming done" as a precondition must explicitly await via {@link #addWarmingCompletedListener}
+     * or {@link #addMergeWarmingCompletedListener}.
+     */
+    private static class ObservableSharedBlobCacheWarmingService extends SharedBlobCacheWarmingService {
 
         private final CopyOnWriteArrayList<ActionListener<Void>> mergeWarmingCompleteListeners = new CopyOnWriteArrayList<>();
         private final CopyOnWriteArrayList<ActionListener<CompletedWarmingDetails>> warmingCompletedListeners =
             new CopyOnWriteArrayList<>();
         private final CopyOnWriteArrayList<Consumer<Type>> beforeWarmingStartsListeners = new CopyOnWriteArrayList<>();
-        private final AtomicBoolean mustSucceed = new AtomicBoolean(true);
 
-        BlockingSharedBlobCacheWarmingService(
+        ObservableSharedBlobCacheWarmingService(
             StatelessSharedBlobCacheService cacheService,
             ThreadPool threadPool,
             TelemetryProvider telemetryProvider,
@@ -1427,8 +1432,6 @@ public class SharedBlobCacheWarmingServiceIT extends AbstractStatelessPluginInte
             }
             wrappedListener.addListener(listener); // completed last
             super.warmCacheMerge(mergeId, shardId, store, segmentsToMerge, blobLocationResolver, mergeCancelled, wrappedListener);
-            assert mustSucceed.get();
-            safeAwait(wrappedListener);
         }
 
         @Override
@@ -1447,18 +1450,10 @@ public class SharedBlobCacheWarmingServiceIT extends AbstractStatelessPluginInte
                 wrappedListener.addListener(voidActionListener.map(nothing -> results));
             }
             wrappedListener.addListener(listener); // completed last
-            // notify beforeWarmingStartedListeners
             for (Consumer<Type> beforeWarmingStartsListener : beforeWarmingStartsListeners) {
                 beforeWarmingStartsListener.accept(type);
             }
             super.warmCache(type, indexShard, commit, directory, endOffsetsToWarm, preWarmForIdLookup, wrappedListener);
-            if (mustSucceed.get()) {
-                safeAwait(wrappedListener);
-            } else {
-                final var future = new UnsafePlainActionFuture<Void>(ThreadPool.Names.GENERIC);
-                wrappedListener.addListener(future);
-                expectThrows(Exception.class, () -> future.actionGet(30, TimeUnit.SECONDS));
-            }
         }
     }
 

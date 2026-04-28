@@ -110,7 +110,6 @@ import org.elasticsearch.telemetry.TestTelemetryPlugin;
 import org.elasticsearch.test.MockLog;
 import org.elasticsearch.test.disruption.BlockMasterServiceOnMaster;
 import org.elasticsearch.test.disruption.ServiceDisruptionScheme;
-import org.elasticsearch.test.junit.annotations.TestIssueLogging;
 import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.test.transport.MockTransportService;
 import org.elasticsearch.transport.TransportChannel;
@@ -4297,11 +4296,6 @@ public class StatelessReshardIT extends AbstractStatelessPluginIntegTestCase {
         waitForReshardCompletion(indexName);
     }
 
-    @TestIssueLogging(
-        value = "org.elasticsearch.xpack.stateless.action.TransportEnsureDocsSearchableAction:TRACE,"
-            + "org.elasticsearch.action.termvectors.TransportTermVectorsAction:TRACE",
-        issueUrl = "https://github.com/elastic/elasticsearch-serverless/issues/6372"
-    )
     public void testTermVectorsApiRealtimeGet() throws Exception {
         String masterNode = startMasterOnlyNode();
         var indexNode = startIndexNode();
@@ -4333,6 +4327,7 @@ public class StatelessReshardIT extends AbstractStatelessPluginIntegTestCase {
 
         var handoffStarted = new CountDownLatch(1);
         var handoffBlocked = new CountDownLatch(1);
+        var doneBlocked = new CountDownLatch(1);
         MockTransportService indexTransportService = MockTransportService.getInstance(indexNode);
         indexTransportService.addSendBehavior((connection, requestId, action, request, options) -> {
             try {
@@ -4342,6 +4337,11 @@ public class StatelessReshardIT extends AbstractStatelessPluginIntegTestCase {
                         if (splitStateRequest.getNewTargetShardState() == IndexReshardingState.Split.TargetShardState.HANDOFF) {
                             handoffStarted.countDown();
                             handoffBlocked.await();
+                        } else if (splitStateRequest.getNewTargetShardState() == IndexReshardingState.Split.TargetShardState.DONE) {
+                            // This test assumes that indexing is successful, so the term vector read also succeeds.
+                            // But bulk shard indexing might fail if resharding completes after the coordinator issues the request,
+                            // but before it reaches the data node.
+                            doneBlocked.await();
                         }
                     }
                 }
@@ -4409,6 +4409,7 @@ public class StatelessReshardIT extends AbstractStatelessPluginIntegTestCase {
             assertEquals(1, response.getFields().size());
             assertEquals("field", response.getFields().iterator().next());
 
+            doneBlocked.countDown();
             waitForReshardCompletion(indexName);
         }
     }
@@ -4453,6 +4454,7 @@ public class StatelessReshardIT extends AbstractStatelessPluginIntegTestCase {
 
         var handoffStarted = new CountDownLatch(1);
         var handoffBlocked = new CountDownLatch(1);
+        var doneBlocked = new CountDownLatch(1);
         MockTransportService indexTransportService = MockTransportService.getInstance(indexNode);
         indexTransportService.addSendBehavior((connection, requestId, action, request, options) -> {
             try {
@@ -4462,6 +4464,11 @@ public class StatelessReshardIT extends AbstractStatelessPluginIntegTestCase {
                         if (splitStateRequest.getNewTargetShardState() == IndexReshardingState.Split.TargetShardState.HANDOFF) {
                             handoffStarted.countDown();
                             handoffBlocked.await();
+                        } else if (splitStateRequest.getNewTargetShardState() == IndexReshardingState.Split.TargetShardState.DONE) {
+                            // This test assumes that indexing is successful, so the term vector read also succeeds.
+                            // But bulk shard indexing might fail if resharding completes after the coordinator issues the request,
+                            // but before it reaches the data node.
+                            doneBlocked.await();
                         }
                     }
                 }
@@ -4531,6 +4538,7 @@ public class StatelessReshardIT extends AbstractStatelessPluginIntegTestCase {
             assertEquals(1, document3Response.getFields().size());
             assertEquals("field", document3Response.getFields().iterator().next());
 
+            doneBlocked.countDown();
             waitForReshardCompletion(indexName);
         }
     }

@@ -2523,7 +2523,11 @@ public class StatelessCommitService extends AbstractLifecycleComponent implement
          * Marks the shard as deleted. Any related {@link ShardCommitState.BlobReference} will be deleted in the upcoming {@link #close()}.
          */
         public void delete() {
-            assert isDeletingIndex : "shard " + shardId + " is deleted without the index marked as deleting";
+            /// TODO: isDeletingIndex may not be set here due to a race between a shard close (e.g. triggered by a
+            /// relocation) and a concurrent index deletion. See #6183.
+            /// This is safe (no theoretical leak found and any blobs not cleaned up via the normal path should be
+            /// covered by StaleIndicesGCService) but we should eventually fix for completeness' sake.
+
             // idempotent
             synchronized (this) {
                 isDeleted = true;

@@ -130,16 +130,16 @@ public class StatelessBalancingWeightsFactoryIT extends AbstractStatelessPluginI
         final String searchNode1 = startSearchNode();
         final String searchNode2 = startSearchNode();
 
-        // Increase the threshold of one of the tiers
+        // Loosen the threshold of one of the tiers, and pin the other tier to a low threshold so it rebalances normally. Both tier
+        // thresholds and the indexing-tier shard balance factor must be set explicitly because StatelessPlugin overrides their defaults
+        // (the threshold to a very large value and the shard balance factor to 0), which would otherwise prevent the indexing tier from
+        // rebalancing even when it is not the tier being loosened.
         final boolean loosenSearchTier = randomBoolean();
-
-        final String setting = loosenSearchTier
-            ? StatelessBalancingWeightsFactory.SEARCH_TIER_BALANCING_THRESHOLD_SETTING.getKey()
-            : StatelessBalancingWeightsFactory.INDEXING_TIER_BALANCING_THRESHOLD_SETTING.getKey();
         updateClusterSettings(
             Settings.builder()
-                .put(setting, 100.0)
-                .put(StatelessBalancingWeightsFactory.INDEXING_TIER_SHARD_BALANCE_FACTOR_SETTING.getKey(), 0.45)
+                .put(StatelessBalancingWeightsFactory.INDEXING_TIER_BALANCING_THRESHOLD_SETTING.getKey(), loosenSearchTier ? 1.0f : 100.0f)
+                .put(StatelessBalancingWeightsFactory.SEARCH_TIER_BALANCING_THRESHOLD_SETTING.getKey(), loosenSearchTier ? 100.0f : 1.0f)
+                .put(StatelessBalancingWeightsFactory.INDEXING_TIER_SHARD_BALANCE_FACTOR_SETTING.getKey(), 0.45f)
                 // Zero write load to isolate the effect of shard count
                 .put(StatelessBalancingWeightsFactory.INDEXING_TIER_WRITE_LOAD_BALANCE_FACTOR_SETTING.getKey(), 0.0)
                 .put(StatelessBalancingWeightsFactory.SEARCH_TIER_WRITE_LOAD_BALANCE_FACTOR_SETTING.getKey(), 0.0)

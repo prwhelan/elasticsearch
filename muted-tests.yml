@@ -400,6 +400,9 @@ tests:
 - class: org.elasticsearch.xpack.transform.transforms.TransformIndexerStateTests
   method: testStopAtCheckpointForThrottledTransform
   issue: https://github.com/elastic/elasticsearch/issues/147716
+- class: org.elasticsearch.search.sort.NestedSortBuilderTests
+  method: testRewrite
+  issue: https://github.com/elastic/elasticsearch/issues/147721
 
 # Examples:
 #

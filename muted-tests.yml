@@ -406,6 +406,9 @@ tests:
 - class: org.elasticsearch.search.runtime.StringScriptFieldTermQueryTests
   method: testEqualsAndHashCode
   issue: https://github.com/elastic/elasticsearch/issues/147743
+- class: org.elasticsearch.search.suggest.completion.CategoryQueryContextTests
+  method: testNullCategoryIsIllegal
+  issue: https://github.com/elastic/elasticsearch/issues/147762
 
 # Examples:
 #

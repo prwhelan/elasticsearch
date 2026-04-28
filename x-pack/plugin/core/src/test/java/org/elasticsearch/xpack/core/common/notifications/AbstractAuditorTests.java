@@ -279,44 +279,64 @@ public class AbstractAuditorTests extends ESTestCase {
     }
 
     @SuppressWarnings("unchecked")
-    public void testWriteDocRetriesOnTransientFailure() throws Exception {
+    public void testWriteDocFailureRecoversViaBacklog() throws Exception {
         AbstractAuditor<AbstractAuditMessageTests.TestAuditMessage> auditor = createTestAuditorWithTemplateInstalled();
         auditor.info("foo", "First message via backlog");
         verify(client, times(1)).execute(eq(TransportBulkAction.TYPE), any(), any());
 
-        AtomicInteger indexAttempts = new AtomicInteger(0);
         doAnswer(ans -> {
             ActionListener<Object> listener = (ActionListener<Object>) ans.getArgument(2);
-            if (indexAttempts.incrementAndGet() < 3) {
-                listener.onFailure(new RuntimeException("transient error"));
-            } else {
-                listener.onResponse(null);
-            }
+            listener.onFailure(new RuntimeException("transient error"));
             return null;
         }).when(client).execute(eq(TransportIndexAction.TYPE), any(), any());
 
-        auditor.info("foo", "Message with retry");
-        // RetryableAction schedules retries asynchronously with backoff
-        assertBusy(() -> assertThat(indexAttempts.get(), equalTo(3)));
+        auditor.info("foo", "Message that fails direct write");
+        // writeDoc fails → reset → indexDoc → backlog → installTemplateAndCreateIndex → writeBacklog (bulk)
+        assertBusy(() -> verify(client, times(2)).execute(eq(TransportBulkAction.TYPE), any(), any()));
     }
 
     @SuppressWarnings("unchecked")
-    public void testWriteDocGivesUpAfterMaxRetries() throws Exception {
-        AbstractAuditor<AbstractAuditMessageTests.TestAuditMessage> auditor = createTestAuditorWithTemplateInstalled();
-        auditor.info("foo", "First message via backlog");
-        verify(client, times(1)).execute(eq(TransportBulkAction.TYPE), any(), any());
+    public void testInstallTemplateRetriesOnTransientFailure() throws Exception {
+        AtomicInteger createIndexAttempts = new AtomicInteger(0);
 
-        AtomicInteger indexAttempts = new AtomicInteger(0);
         doAnswer(ans -> {
-            ActionListener<Object> listener = (ActionListener<Object>) ans.getArgument(2);
-            indexAttempts.incrementAndGet();
-            listener.onFailure(new RuntimeException("persistent error"));
+            ActionListener<AcknowledgedResponse> listener = ans.getArgument(2);
+            listener.onResponse(AcknowledgedResponse.TRUE);
             return null;
-        }).when(client).execute(eq(TransportIndexAction.TYPE), any(), any());
+        }).when(client).execute(eq(TransportPutComposableIndexTemplateAction.TYPE), any(), any());
 
-        auditor.info("foo", "Message that always fails");
-        // 1 initial attempt in writeDoc + MAX_WRITE_RETRIES attempts in retryWriteDoc
-        assertBusy(() -> assertThat(indexAttempts.get(), equalTo(1 + AbstractAuditor.MAX_WRITE_RETRIES)));
+        doAnswer(ans -> {
+            ActionListener<CreateIndexResponse> listener = ans.getArgument(2);
+            if (createIndexAttempts.incrementAndGet() < 3) {
+                listener.onFailure(new RuntimeException("transient create index error"));
+            } else {
+                listener.onResponse(new CreateIndexResponse(true, true, "foo"));
+            }
+            return null;
+        }).when(client).execute(eq(TransportCreateIndexAction.TYPE), any(), any());
+
+        doAnswer(ans -> {
+            ActionListener<ClusterHealthResponse> listener = ans.getArgument(2);
+            listener.onResponse(new ClusterHealthResponse());
+            return null;
+        }).when(client).execute(eq(TransportClusterHealthAction.TYPE), any(), any());
+
+        IndicesAdminClient indicesAdminClient = mock(IndicesAdminClient.class);
+        AdminClient adminClient = mock(AdminClient.class);
+        when(adminClient.indices()).thenReturn(indicesAdminClient);
+        when(client.admin()).thenReturn(adminClient);
+
+        ClusterState state = ClusterState.builder(ClusterName.DEFAULT).build();
+        ClusterService clusterService = mock(ClusterService.class);
+        when(clusterService.state()).thenReturn(state);
+        when(clusterService.threadPool()).thenReturn(threadPool);
+
+        TestAuditor auditor = new TestAuditor(client, TEST_NODE_NAME, clusterService);
+
+        auditor.info("foobar", "Message queued during index creation");
+
+        assertBusy(() -> assertThat(createIndexAttempts.get(), equalTo(3)));
+        assertBusy(() -> verify(client, times(1)).execute(eq(TransportBulkAction.TYPE), any(), any()));
     }
 
     public void testMaxBufferSize() throws Exception {

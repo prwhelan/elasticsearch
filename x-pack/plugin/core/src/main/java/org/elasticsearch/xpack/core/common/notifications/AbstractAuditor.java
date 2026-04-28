@@ -20,7 +20,6 @@ import org.elasticsearch.client.internal.OriginSettingClient;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.core.TimeValue;
-import org.elasticsearch.index.IndexNotFoundException;
 import org.elasticsearch.xcontent.ToXContent;
 import org.elasticsearch.xcontent.XContentBuilder;
 import org.elasticsearch.xpack.core.ml.utils.MlIndexAndAlias;
@@ -117,8 +116,12 @@ public abstract class AbstractAuditor<T extends AbstractAuditMessage> {
     }
 
     protected void indexDoc(ToXContent toXContent) {
+        indexDoc(toXContent, 0);
+    }
+
+    private void indexDoc(ToXContent toXContent, int writeRetries) {
         if (indexAndAliasCreated.get()) {
-            writeDoc(toXContent);
+            writeDoc(toXContent, writeRetries);
             return;
         }
 
@@ -131,7 +134,10 @@ public abstract class AbstractAuditor<T extends AbstractAuditMessage> {
                 writeBacklog();
             }
 
-        }, e -> { indexAndAliasCreationInProgress.set(false); });
+        }, e -> {
+            logger.warn("Failed to create audit index and alias after [{}] attempts", 1 + MAX_WRITE_RETRIES, e);
+            indexAndAliasCreationInProgress.set(false);
+        });
 
         synchronized (this) {
             if (indexAndAliasCreated.get() == false) {
@@ -151,54 +157,23 @@ public abstract class AbstractAuditor<T extends AbstractAuditMessage> {
                     installTemplateAndCreateIndex(createListener);
                 }
             } else {
-                writeDoc(toXContent);
+                writeDoc(toXContent, writeRetries);
             }
         }
     }
 
-    private void writeDoc(ToXContent toXContent) {
+    private void writeDoc(ToXContent toXContent, int writeRetries) {
         client.index(indexRequest(toXContent), ActionListener.wrap(AbstractAuditor::onIndexResponse, e -> {
-            if (e instanceof IndexNotFoundException) {
-                handleIndexNotFound(toXContent);
+            if (writeRetries >= MAX_WRITE_RETRIES) {
+                onIndexFailure(e);
             } else {
-                retryWriteDoc(toXContent);
+                logger.debug("Failed to write audit message, resetting and re-entering indexDoc", e);
+                executorService.execute(() -> {
+                    reset();
+                    indexDoc(toXContent, writeRetries + 1);
+                });
             }
         }));
-    }
-
-    private void retryWriteDoc(ToXContent toXContent) {
-        var attempts = new AtomicInteger(0);
-        new RetryableAction<DocWriteResponse>(
-            logger,
-            clusterService.threadPool(),
-            RETRY_INITIAL_DELAY,
-            RETRY_TIMEOUT,
-            ActionListener.wrap(AbstractAuditor::onIndexResponse, e -> {
-                if (e instanceof IndexNotFoundException) {
-                    handleIndexNotFound(toXContent);
-                } else {
-                    onIndexFailure(e);
-                }
-            }),
-            executorService
-        ) {
-            @Override
-            public void tryAction(ActionListener<DocWriteResponse> listener) {
-                client.index(indexRequest(toXContent), listener);
-            }
-
-            @Override
-            public boolean shouldRetry(Exception e) {
-                return (e instanceof IndexNotFoundException) == false && attempts.getAndIncrement() < MAX_WRITE_RETRIES;
-            }
-        }.run();
-    }
-
-    private void handleIndexNotFound(ToXContent toXContent) {
-        executorService.execute(() -> {
-            reset();
-            indexDoc(toXContent);
-        });
     }
 
     private IndexRequest indexRequest(ToXContent toXContent) {
@@ -250,23 +225,39 @@ public abstract class AbstractAuditor<T extends AbstractAuditMessage> {
     }
 
     private void installTemplateAndCreateIndex(ActionListener<Boolean> listener) {
-        SubscribableListener.<Boolean>newForked(l -> {
-            MlIndexAndAlias.installIndexTemplateIfRequired(clusterService.state(), client, templateVersion(), putTemplateRequest(), l);
-        }).<Boolean>andThen((l, success) -> {
-            var indexDetails = indexDetails();
-            MlIndexAndAlias.createIndexAndAliasIfNecessary(
-                client,
-                clusterService.state(),
-                indexNameExpressionResolver,
-                indexDetails.indexPrefix(),
-                indexDetails.indexVersion(),
-                auditIndexWriteAlias,
-                MASTER_TIMEOUT,
-                ActiveShardCount.DEFAULT,
-                l
-            );
+        var attempts = new AtomicInteger(0);
+        new RetryableAction<Boolean>(logger, clusterService.threadPool(), RETRY_INITIAL_DELAY, RETRY_TIMEOUT, listener, executorService) {
+            @Override
+            public void tryAction(ActionListener<Boolean> retryListener) {
+                SubscribableListener.<Boolean>newForked(l -> {
+                    MlIndexAndAlias.installIndexTemplateIfRequired(
+                        clusterService.state(),
+                        client,
+                        templateVersion(),
+                        putTemplateRequest(),
+                        l
+                    );
+                }).<Boolean>andThen((l, success) -> {
+                    var indexDetails = indexDetails();
+                    MlIndexAndAlias.createIndexAndAliasIfNecessary(
+                        client,
+                        clusterService.state(),
+                        indexNameExpressionResolver,
+                        indexDetails.indexPrefix(),
+                        indexDetails.indexVersion(),
+                        auditIndexWriteAlias,
+                        MASTER_TIMEOUT,
+                        ActiveShardCount.DEFAULT,
+                        l
+                    );
+                }).addListener(retryListener);
+            }
 
-        }).addListener(listener);
+            @Override
+            public boolean shouldRetry(Exception e) {
+                return attempts.getAndIncrement() < MAX_WRITE_RETRIES;
+            }
+        }.run();
     }
 
     protected abstract TransportPutComposableIndexTemplateAction.Request putTemplateRequest();

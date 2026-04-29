@@ -532,3 +532,6 @@ tests:
 - class: org.elasticsearch.xpack.security.authc.HttOptionsNoAuthnIntegTests
   method: testNoAuthnForResourceOptionsMethod
   issue: https://github.com/elastic/elasticsearch/issues/147899
+- class: org.elasticsearch.smoketest.SmokeTestMultiNodeClientYamlTestSuiteIT
+  method: test {yaml=synonyms/110_synonyms_invalid/Load index with an invalid synonym rule with lenient set to false}
+  issue: https://github.com/elastic/elasticsearch/issues/147907

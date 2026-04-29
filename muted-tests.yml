@@ -406,6 +406,9 @@ tests:
 - class: org.elasticsearch.upgrades.SemanticTextUpgradeIT
   method: testSemanticTextOperations {p0=false}
   issue: https://github.com/elastic/elasticsearch/issues/147776
+- class: org.elasticsearch.cluster.routing.IndexRoutingTests
+  method: testRequiredRoutingUsesSliceMessageWhenSliceEnabled
+  issue: https://github.com/elastic/elasticsearch/issues/147777
 
 # Examples:
 #

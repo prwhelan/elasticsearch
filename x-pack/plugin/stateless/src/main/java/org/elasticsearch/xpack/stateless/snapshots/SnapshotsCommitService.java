@@ -226,10 +226,19 @@ public class SnapshotsCommitService implements ClusterStateListener {
     }
 
     /**
-     * Callback on shard closed. Remove the shard from tracking and release all its retained commits for snapshots.
+     * Callback on shard closed. Remove the shard from tracking and release all its retained commits for snapshots
+     * if the index is not being deleted. When the shard is closing as part of an index deletion, tracking is retained
+     * so the commit blobs stay alive until each snapshot gets aborted, see also SnapshotShardsService. This prevents
+     * NoSuchFileException being thrown during shard snapshots, especially when the shard runs on a different node
+     * than the shard snapshot. The retained releasables are closed instead by {@link #clusterChanged} once shard snapshots
+     * are no longer reading shard data.
      */
     public void releaseCommitsAndRemoveShardAfterShardClosed(ShardId shardId) {
         assert commitService.isShardClosed(shardId) : "shard [" + shardId + "] is not closed";
+        if (commitService.isShardDeletingIndex(shardId)) {
+            logger.debug("retain snapshot commits for shard {} after shard close due to index deletion", shardId);
+            return;
+        }
         final var shardReleasables = snapshotsCommitReleasables.remove(shardId);
         if (shardReleasables != null) {
             logger.debug("release snapshot commits for shard {} after shard close", shardId);

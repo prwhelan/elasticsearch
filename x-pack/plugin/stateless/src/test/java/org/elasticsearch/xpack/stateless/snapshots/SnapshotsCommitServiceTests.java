@@ -286,13 +286,28 @@ public class SnapshotsCommitServiceTests extends ESTestCase {
                     if (randomBoolean()) {
                         commitService.unregister(shardId);
                     }
-                    // If the index is being deleted, commits retained on recovery are also deleted
+                    // Index is being deleted: snapshot commit tracking is retained so BCC blobs stay alive until the
+                    // snapshot completes or aborts. The retained stale commits must not be deleted while the snapshot
+                    // is still active.
+                    assertTrue(testHarness.snapshotsCommitService.hasTrackingForShard(shardId));
+                    for (var staleCommit : staleCommits(initialCommits, shardId)) {
+                        assertFalse(
+                            "initial commit " + staleCommit + " should not be deleted while snapshot is active",
+                            deletedCommits.contains(staleCommit)
+                        );
+                    }
+
+                    // Complete the snapshot via cluster state update. SnapshotsCommitService.clusterChanged then
+                    // closes the retained releasable, which finally releases the commits for deletion.
+                    final var stateWithoutSnapshot = removeSnapshotFromClusterState(stateWithSnapshot, snapshot);
+                    ClusterServiceUtils.setState(testHarness.clusterService, stateWithoutSnapshot);
                     assertBusy(
                         () -> assertThat(
                             deletedCommits,
                             hasItems(staleCommits(initialCommits, shardId).toArray(StaleCompoundCommit[]::new))
                         )
                     );
+                    assertFalse(testHarness.snapshotsCommitService.hasTrackingForShard(shardId));
                 }
             }
         }

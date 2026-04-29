@@ -17,6 +17,7 @@
 
 package org.elasticsearch.xpack.stateless.snapshots;
 
+import org.elasticsearch.action.support.SubscribableListener;
 import org.elasticsearch.cluster.SnapshotsInProgress;
 import org.elasticsearch.cluster.metadata.ProjectId;
 import org.elasticsearch.cluster.routing.IndexRoutingTable;
@@ -36,6 +37,7 @@ import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.repositories.RepositoriesService;
 import org.elasticsearch.snapshots.SnapshotState;
 import org.elasticsearch.telemetry.TestTelemetryPlugin;
+import org.elasticsearch.test.ClusterServiceUtils;
 import org.elasticsearch.test.disruption.NetworkDisruption;
 import org.elasticsearch.test.transport.MockTransportService;
 import org.elasticsearch.threadpool.ThreadPool;
@@ -56,12 +58,13 @@ import java.nio.file.NoSuchFileException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.elasticsearch.cluster.coordination.FollowersChecker.FOLLOWER_CHECK_INTERVAL_SETTING;
 import static org.elasticsearch.cluster.coordination.FollowersChecker.FOLLOWER_CHECK_RETRY_COUNT_SETTING;
@@ -273,10 +276,11 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
         assertThat(count, equalTo((long) nDocs));
     }
 
-    public void testRelocationBeforeCommitAcquire() {
+    public void testRelocationBeforeCommitAcquire() throws Exception {
         final var settings = Settings.builder()
             .put(STATELESS_SNAPSHOT_ENABLED_SETTING.getKey(), "enabled")
             .put(RELOCATION_DURING_SNAPSHOT_ENABLED_SETTING.getKey(), true)
+            .put(ObjectStoreService.TYPE_SETTING.getKey(), ObjectStoreService.ObjectStoreType.MOCK)
             .put("thread_pool.snapshot.max", 1)
             .build();
         final var node0 = startMasterAndIndexNode(settings);
@@ -285,12 +289,14 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
         final var repoName = randomIdentifier();
         createRepository(repoName, "fs");
 
-        final String indexName = randomIdentifier();
-        createIndex(indexName, indexSettings(1, 0).put("index.routing.allocation.exclude._name", node1).build());
-        ensureGreen(indexName);
-        indexAndMaybeFlush(indexName);
+        // indexA goes through the relocation+remote-fallback success path; indexB is deleted while blocked, so its
+        // shard snapshot is aborted via SnapshotShardsService's cluster-state listener before its task runs.
+        final var indices = createTwoIndicesExcluding(node1);
 
-        // Block the single SNAPSHOT thread on node0 so the shard snapshot task cannot start
+        // Install a strategy to ensure snapshot does not try to read missing blobs
+        setNodeRepositoryStrategy(node0, new AssertNoMissingBlobStrategy());
+
+        // Block the single SNAPSHOT thread on node0 so the shard snapshot tasks cannot start.
         final var snapshotThreadBarrier = new CyclicBarrier(2);
         internalCluster().getInstance(ThreadPool.class, node0).executor(ThreadPool.Names.SNAPSHOT).execute(() -> {
             safeAwait(snapshotThreadBarrier);
@@ -298,10 +304,13 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
         });
         safeAwait(snapshotThreadBarrier);
 
-        // Start the snapshot — shard snapshot task is enqueued but cannot run
+        final var shardSnapshotAborted = observeShardSnapshotAborted(node0, repoName, indices.shardIdB());
+
+        // Start the snapshot — shard snapshot tasks are enqueued but cannot run.
         final String snapshotName = randomSnapshotName();
         final var snapshotFuture = clusterAdmin().prepareCreateSnapshot(TEST_REQUEST_TIMEOUT, repoName, snapshotName)
-            .setIndices(indexName)
+            .setIndices(indices.indexA(), indices.indexB())
+            .setPartial(true)
             .setWaitForCompletion(true)
             .execute();
 
@@ -309,7 +318,6 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
         // otherwise the master may process the settings update first and assign the snapshot
         // directly to node1, never exercising the local-then-remote fallback this test covers.
         final var node0Id = getNodeId(node0);
-        final var shardId = new ShardId(resolveIndex(indexName), 0);
         awaitClusterState(state -> {
             final var entry = SnapshotsInProgress.get(state)
                 .asStream()
@@ -319,46 +327,58 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
             if (entry == null) {
                 return false;
             }
-            final var status = entry.shards().get(shardId);
+            // Checking one shard is enough since all shard entries are created with a single cluster state update
+            final var status = entry.shards().get(indices.shardIdA);
             return status != null && node0Id.equals(status.nodeId());
         });
 
-        // Relocate shard to node1 while the SNAPSHOT pool on node0 is blocked
+        // Relocate both shards to node1 while the SNAPSHOT pool on node0 is blocked.
         updateIndexSettings(Settings.builder().put("index.routing.allocation.exclude._name", node0));
-        ensureGreen(indexName);
-        assertThat(internalCluster().nodesInclude(indexName), equalTo(Set.of(node1)));
+        ensureGreen(indices.indexA(), indices.indexB());
+        assertThat(internalCluster().nodesInclude(indices.indexA()), equalTo(Set.of(node1)));
+        assertThat(internalCluster().nodesInclude(indices.indexB()), equalTo(Set.of(node1)));
 
-        // Intercept the get_commit_info request on node1 to verify the fallback to remote
+        // Delete indexB while still blocked. This aborts its shard snapshot status on node0 via the cluster-state
+        // listener while the primary is now on node1.
+        safeGet(client().admin().indices().prepareDelete(indices.indexB()).execute());
+
+        // Intercept the get_commit_info request on node1 — only indexA reaches the fallback (indexB short-circuits
+        // at the first ensureNotAborted in snapshot()).
         final var interceptedOnNode1 = new CountDownLatch(1);
         MockTransportService.getInstance(node1)
             .addRequestHandlingBehavior(TransportGetShardSnapshotCommitInfoAction.SHARD_ACTION_NAME, (handler, request, channel, task) -> {
+                final var getShardSnapshotCommitInfoRequest = (GetShardSnapshotCommitInfoRequest) request;
+                assertThat(getShardSnapshotCommitInfoRequest.shardId().getIndexName(), equalTo(indices.indexA()));
                 interceptedOnNode1.countDown();
                 handler.messageReceived(request, channel, task);
             });
 
-        // Unblock SNAPSHOT pool — shard snapshot task runs, asyncCreate fails (shard gone),
-        // falls back to TransportGetShardSnapshotCommitInfoAction to node1
+        // Unblock the SNAPSHOT pool. indexA's asyncCreate fails locally and falls back to TransportGetShardSnapshotCommitInfoAction
+        // on node1. indexB's task throws AbortedSnapshotException due to index deletion
         safeAwait(snapshotThreadBarrier);
 
-        // Verify the request was sent to node1
         safeAwait(interceptedOnNode1);
+        safeAwait(shardSnapshotAborted);
 
-        // Verify the snapshot completed successfully
         final var snapshotInfo = safeGet(snapshotFuture).getSnapshotInfo();
         assertThat(snapshotInfo.state(), equalTo(SnapshotState.SUCCESS));
+        assertThat(snapshotInfo.totalShards(), equalTo(1));
         assertThat(snapshotInfo.successfulShards(), equalTo(1));
         assertThat(snapshotInfo.failedShards(), equalTo(0));
 
         // Verify SnapshotsCommitService has no leftover tracking on any node
         for (SnapshotsCommitService commitService : internalCluster().getInstances(SnapshotsCommitService.class)) {
-            assertFalse(commitService.hasTrackingForShard(shardId));
+            assertBusy(() -> assertFalse(commitService.hasTrackingForShard(indices.shardIdA())));
+            assertBusy(() -> assertFalse(commitService.hasTrackingForShard(indices.shardIdB())));
         }
     }
 
-    public void testRelocationAfterCommitAcquire() {
+    public void testRelocationAfterCommitAcquire() throws Exception {
         final var settings = Settings.builder()
             .put(STATELESS_SNAPSHOT_ENABLED_SETTING.getKey(), "read_from_object_store")
             .put(ObjectStoreService.TYPE_SETTING.getKey(), ObjectStoreService.ObjectStoreType.MOCK)
+            // Ensure both shards' snapshot tasks can run and block concurrently
+            .put("thread_pool.snapshot.max", 2)
             .build();
         final var node0 = startMasterAndIndexNode(settings);
         final var node1 = startMasterAndIndexNode(settings);
@@ -372,16 +392,15 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
         final var repoName = randomIdentifier();
         createRepository(repoName, "fs");
 
-        final String indexName = randomIdentifier();
-        createIndex(indexName, indexSettings(1, 0).put("index.routing.allocation.exclude._name", node1).build());
-        ensureGreen(indexName);
-        indexAndMaybeFlush(indexName);
+        // indexA goes through the success path (reads from the object store after relocation);
+        // indexB is deleted mid-read so its shard snapshot is aborted.
+        final var indices = createTwoIndicesExcluding(node1);
 
-        // Block object store reads on node0 — when a SNAPSHOT_DATA read is intercepted,
-        // the commit must have already been acquired locally
-        final var readIntercepted = new CountDownLatch(1);
+        // Block object store reads on node0 — when a SNAPSHOT_DATA read is intercepted, both shards' commits have
+        // already been acquired locally.
+        final var readIntercepted = new CountDownLatch(2); // expect 2 reads each from one shard snapshot
         final var unblockRead = new CountDownLatch(1);
-        setNodeRepositoryStrategy(node0, new StatelessMockRepositoryStrategy() {
+        setNodeRepositoryStrategy(node0, new AssertNoMissingBlobStrategy() {
             @Override
             public InputStream blobContainerReadBlob(
                 CheckedSupplier<InputStream, IOException> originalSupplier,
@@ -390,9 +409,12 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
             ) throws IOException {
                 if (purpose == OperationPurpose.SNAPSHOT_DATA) {
                     readIntercepted.countDown();
+                    if (unblockRead.getCount() > 0) {
+                        logger.info("--> blocking snapshot data read for [{}]", blobName);
+                    }
                     safeAwait(unblockRead);
                 }
-                return originalSupplier.get();
+                return super.blobContainerReadBlob(originalSupplier, purpose, blobName);
             }
 
             @Override
@@ -405,48 +427,69 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
             ) throws IOException {
                 if (purpose == OperationPurpose.SNAPSHOT_DATA) {
                     readIntercepted.countDown();
+                    if (unblockRead.getCount() > 0) {
+                        logger.info(
+                            "--> blocking snapshot data read for [{}] at position [{}] with length [{}]",
+                            blobName,
+                            position,
+                            length
+                        );
+                    }
                     safeAwait(unblockRead);
                 }
-                return originalSupplier.get();
+                return super.blobContainerReadBlob(originalSupplier, purpose, blobName, position, length);
             }
         });
 
-        // Start the snapshot
-        final String snapshotName = randomSnapshotName();
-        final var snapshotFuture = clusterAdmin().prepareCreateSnapshot(TEST_REQUEST_TIMEOUT, repoName, snapshotName)
-            .setIndices(indexName)
+        // Commits are acquired before index deletion so that we should not see any remote get commit info request
+        MockTransportService.getInstance(node1)
+            .addRequestHandlingBehavior(TransportGetShardSnapshotCommitInfoAction.SHARD_ACTION_NAME, (handler, request, channel, task) -> {
+                throw new AssertionError("unexpected get_commit_info request on node1");
+            });
+
+        final var shardSnapshotAborted = observeShardSnapshotAborted(node0, repoName, indices.shardIdB());
+
+        final var snapshotFuture = clusterAdmin().prepareCreateSnapshot(TEST_REQUEST_TIMEOUT, repoName, randomSnapshotName())
+            .setIndices(indices.indexA(), indices.indexB())
+            .setPartial(true)
             .setWaitForCompletion(true)
             .execute();
 
-        // Wait for the read to be intercepted — commit is already acquired at this point
         safeAwait(readIntercepted);
 
-        // Relocate shard to node1 while the snapshot is reading data from the object store
+        // Relocate both shards to node1 while the snapshot is reading data from the object store.
         updateIndexSettings(Settings.builder().put("index.routing.allocation.exclude._name", node0));
-        ensureGreen(indexName);
-        assertThat(internalCluster().nodesInclude(indexName), equalTo(Set.of(node1)));
+        ensureGreen(indices.indexA(), indices.indexB());
+        assertThat(internalCluster().nodesInclude(indices.indexA()), equalTo(Set.of(node1)));
+        assertThat(internalCluster().nodesInclude(indices.indexB()), equalTo(Set.of(node1)));
 
-        // Unblock the read — snapshot proceeds using the retained commit
+        safeGet(client().admin().indices().prepareDelete(indices.indexB()).execute());
+
+        // Unblock the reads. indexA's snapshot proceeds using the retained commit after relocation. indexB's task encounters the
+        // abort at the next per-file ensureNotAborted check and fails as aborted due to index deletion.
         unblockRead.countDown();
 
-        // Verify the snapshot completed successfully
+        safeAwait(shardSnapshotAborted);
+
         final var snapshotInfo = safeGet(snapshotFuture).getSnapshotInfo();
         assertThat(snapshotInfo.state(), equalTo(SnapshotState.SUCCESS));
+        assertThat(snapshotInfo.totalShards(), equalTo(1));
         assertThat(snapshotInfo.successfulShards(), equalTo(1));
         assertThat(snapshotInfo.failedShards(), equalTo(0));
 
-        // Verify SnapshotsCommitService has no leftover tracking on any node
-        final var shardId = new ShardId(resolveIndex(indexName), 0);
         for (SnapshotsCommitService commitService : internalCluster().getInstances(SnapshotsCommitService.class)) {
-            assertFalse(commitService.hasTrackingForShard(shardId));
+            assertBusy(() -> assertFalse(commitService.hasTrackingForShard(indices.shardIdA())));
+            assertBusy(() -> assertFalse(commitService.hasTrackingForShard(indices.shardIdB())));
         }
     }
 
-    public void testRelocationDuringCommitAcquisition() {
+    public void testRelocationDuringCommitAcquisition() throws Exception {
         final var settings = Settings.builder()
             .put(STATELESS_SNAPSHOT_ENABLED_SETTING.getKey(), "enabled")
             .put(RELOCATION_DURING_SNAPSHOT_ENABLED_SETTING.getKey(), true)
             .put(ObjectStoreService.TYPE_SETTING.getKey(), ObjectStoreService.ObjectStoreType.MOCK)
+            // Ensure both shards' snapshot tasks can run and block concurrently
+            .put("thread_pool.snapshot.max", 2)
             .build();
         final var node0 = startMasterAndIndexNode(settings);
         final var node1 = startMasterAndIndexNode(settings);
@@ -454,63 +497,79 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
         final var repoName = randomIdentifier();
         createRepository(repoName, "fs");
 
-        final String indexName = randomIdentifier();
-        createIndex(indexName, indexSettings(1, 0).put("index.routing.allocation.exclude._name", node1).build());
-        ensureGreen(indexName);
-        indexAndMaybeFlush(indexName);
+        // indexA stays in the snapshot through the relocation; indexB is deleted while block at commit acquisition..
+        final var indices = createTwoIndicesExcluding(node1);
 
-        // Hook into node0's primary engine: after acquireIndexCommitForSnapshot returns, signal the test so that it
-        // relocates the shard before the full commit registration can complete
-        final var acquiredOnNode0 = new CountDownLatch(1);
-        final var unblockNode0 = new CountDownLatch(1);
+        // Install a strategy to ensure snapshot does not try to read missing blobs
+        setNodeRepositoryStrategy(node0, new AssertNoMissingBlobStrategy());
+
+        // Per-shard hook into node0's primary engine: after acquireIndexCommitForSnapshot returns, signal the test
+        // and pause until released.
+        final var acquiredA = new CountDownLatch(1);
+        final var acquiredB = new CountDownLatch(1);
+        final var unblockA = new CountDownLatch(1);
+        final var unblockB = new CountDownLatch(1);
         final var interceptPlugin = findPlugin(node0, SnapshotCommitInterceptPlugin.class);
-        interceptPlugin.afterAcquireForSnapshot.set(() -> {
-            acquiredOnNode0.countDown();
-            safeAwait(unblockNode0);
+        interceptPlugin.afterAcquireForSnapshot.put(indices.shardIdA(), () -> {
+            acquiredA.countDown();
+            safeAwait(unblockA);
+        });
+        interceptPlugin.afterAcquireForSnapshot.put(indices.shardIdB(), () -> {
+            acquiredB.countDown();
+            safeAwait(unblockB);
         });
 
-        // Intercept get_commit_info request on node1 to verify the fallback to the new primary
+        // Intercept get_commit_info request on node1 — only indexA reaches the fallback. indexB's shard snapshot fails
+        // due to index deletion (IndexNotFoundException) before it can retry on remote node.
         final var interceptedOnNode1 = new CountDownLatch(1);
         MockTransportService.getInstance(node1)
             .addRequestHandlingBehavior(TransportGetShardSnapshotCommitInfoAction.SHARD_ACTION_NAME, (handler, request, channel, task) -> {
+                final var getShardSnapshotCommitInfoRequest = (GetShardSnapshotCommitInfoRequest) request;
+                assertThat(getShardSnapshotCommitInfoRequest.shardId().getIndexName(), equalTo(indices.indexA()));
                 interceptedOnNode1.countDown();
                 handler.messageReceived(request, channel, task);
             });
 
-        // Start the snapshot
-        final String snapshotName = randomSnapshotName();
-        final var snapshotFuture = clusterAdmin().prepareCreateSnapshot(TEST_REQUEST_TIMEOUT, repoName, snapshotName)
-            .setIndices(indexName)
+        final var shardSnapshotFailed = observeShardSnapshotFailed(node0, repoName, indices.shardIdB());
+
+        // Start the snapshot covering both indices. Partial so master allows index deletion to proceed concurrently.
+        final var snapshotFuture = clusterAdmin().prepareCreateSnapshot(TEST_REQUEST_TIMEOUT, repoName, randomSnapshotName())
+            .setIndices(indices.indexA(), indices.indexB())
+            .setPartial(true)
             .setWaitForCompletion(true)
             .execute();
 
-        // Wait for commit is acquired on node0, i.e. the shard snapshot started but has not complete
-        // acquireAndMaybeRegisterCommitForSnapshot yet, e.g. blob locations not yet computed.
-        safeAwait(acquiredOnNode0);
-        interceptPlugin.afterAcquireForSnapshot.set(null);
+        // Both shards' commits are acquired on node0 and the tasks blocked inside the hook.
+        safeAwait(acquiredA);
+        safeAwait(acquiredB);
+        interceptPlugin.afterAcquireForSnapshot.remove(indices.shardIdA());
+        interceptPlugin.afterAcquireForSnapshot.remove(indices.shardIdB());
 
-        // Relocate the shard to node1 while the snapshot task on node0 is paused. Relocation completes (source shard
-        // closes and unregisters) while node0 still holds the pre-register SnapshotIndexCommit.
+        // Relocate both shards to node1; the source shards close and release the commits while they are retained again on node1.
         updateIndexSettings(Settings.builder().put("index.routing.allocation.exclude._name", node0));
-        ensureGreen(indexName);
-        assertThat(internalCluster().nodesInclude(indexName), equalTo(Set.of(node1)));
+        ensureGreen(indices.indexA(), indices.indexB());
+        assertThat(internalCluster().nodesInclude(indices.indexA()), equalTo(Set.of(node1)));
+        assertThat(internalCluster().nodesInclude(indices.indexB()), equalTo(Set.of(node1)));
 
-        // Unblock node0's snapshot task. When it proceeds, commit registration fails on node0 at shardStateId computation
-        // and retries on node1
-        unblockNode0.countDown();
-        // Verify the retry reached node1
+        // Delete indexB while node0's snapshot task is still blocked.
+        safeGet(client().admin().indices().prepareDelete(indices.indexB()).execute());
+
+        // Unblock both tasks. indexA's task retries on node1; indexB shard snapshot fails
+        unblockA.countDown();
+        unblockB.countDown();
+
         safeAwait(interceptedOnNode1);
+        safeAwait(shardSnapshotFailed);
 
-        // Verify the snapshot completed successfully
         final var snapshotInfo = safeGet(snapshotFuture).getSnapshotInfo();
         assertThat(snapshotInfo.state(), equalTo(SnapshotState.SUCCESS));
+        assertThat(snapshotInfo.totalShards(), equalTo(1));
         assertThat(snapshotInfo.successfulShards(), equalTo(1));
         assertThat(snapshotInfo.failedShards(), equalTo(0));
 
-        // Verify SnapshotsCommitService has no leftover tracking on any node
-        final var shardId = new ShardId(resolveIndex(indexName), 0);
         for (SnapshotsCommitService commitService : internalCluster().getInstances(SnapshotsCommitService.class)) {
-            assertFalse(commitService.hasTrackingForShard(shardId));
+            assertBusy(() -> assertFalse(commitService.hasTrackingForShard(indices.shardIdA())));
+            assertBusy(() -> assertFalse(commitService.hasTrackingForShard(indices.shardIdB())));
         }
     }
 
@@ -601,9 +660,11 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
 
         final var shardId0 = new ShardId(resolveIndex(indexName), 0);
 
-        // Block the shard snapshot on its metadataSnapshot read from the object store
+        // Block the shard snapshot on its store metadataSnapshot read from the object store.
         final var readStrategy = new BlockingMetadataReadStrategy(1);
         setNodeRepositoryStrategy(node, readStrategy);
+
+        final var shardSnapshotAborted = observeShardSnapshotAborted(node, repoName, shardId0);
 
         final var snapshotFuture = client().admin()
             .cluster()
@@ -614,19 +675,19 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
             .execute();
         safeAwait(readStrategy.readObserved);
 
-        // While the shard snapshot is blocked inside metadataSnapshot, delete the index. This aborts the in-progress
-        // snapshot and closes the shard which drops the SnapshotIndexCommit's initial ref, allowing the backing
-        // BCC blobs to become eligible for deletion. metadataSnapshot holds an extra commit ref for the duration of the read,
-        // which prevents the cleanup and NoSuchFileException. The shard snapshot will then find out the abort by deletion
-        // when it starts to read shard files.
+        // Delete the index while the shard snapshot is blocked mid-metadataSnapshot. This should trigger shard snapshot abort.
         safeGet(client().admin().indices().prepareDelete(indexName).execute());
 
+        // Index deletion itself does not release the snapshot commit tracking when supportsRelocationDuringSnapshot is true
         final var snapshotsCommitService = internalCluster().getInstance(SnapshotsCommitService.class, node);
-        assertBusy(() -> assertFalse(snapshotsCommitService.hasTrackingForShard(shardId0)));
+        assertTrue(snapshotsCommitService.hasTrackingForShard(shardId0));
 
         readStrategy.proceed.countDown();
-        final var response = safeGet(snapshotFuture);
-        assertThat(response.getSnapshotInfo(), notNullValue());
+        // Shard snapshot should abort and fail
+        safeAwait(shardSnapshotAborted);
+        safeGet(snapshotFuture);
+        // Retained commit tracking is released by SnapshotsCommitService.clusterChanged once the snapshot is completed.
+        assertBusy(() -> assertFalse(snapshotsCommitService.hasTrackingForShard(shardId0)));
     }
 
     public void testSnapshotFailsCleanlyWhenIndexDeletedBeforeMetadataRead() throws Exception {
@@ -642,13 +703,12 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
         indexAndMaybeFlush(indexName);
         flush(indexName);
 
-        // Use a mock-type snapshot repo so we can block on reads to it (the object store's mock repo is a separate instance).
+        // Use a mock-type snapshot repo (separate instance from the object store mock) so we can block reads on it.
         final var repoName = randomRepoName();
         createRepository(repoName, StatelessMockRepositoryPlugin.TYPE);
 
-        // A first successful snapshot establishes a real shard generation; without one, the next snapshot hits the
-        // NEW_SHARD_GEN fast path in buildBlobStoreIndexShardSnapshots and never reads from the snapshot repo before
-        // metadataSnapshot.
+        // A prior snapshot establishes a real shard generation; otherwise the next one hits the NEW_SHARD_GEN fast
+        // path in buildBlobStoreIndexShardSnapshots and doesn't touch the snapshot repo before metadataSnapshot.
         createSnapshot(repoName, "snap-initial", List.of(indexName), List.of());
         indexAndMaybeFlush(indexName);
         flush(indexName);
@@ -656,17 +716,16 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
         final var shardId0 = new ShardId(resolveIndex(indexName), 0);
 
         // Block the snapshot-repo metadata read in buildBlobStoreIndexShardSnapshots, which runs before metadataSnapshot.
-        // Deleting the index while blocked means that, when the read resumes, the commit is released and the shard snapshot
-        // is aborted. Subsequent metadataSnapshot call must bail out and not try to read a deleted BCC.
         final var readStrategy = new BlockingMetadataReadStrategy(1);
         final var snapshotRepo = (StatelessMockRepository) internalCluster().getInstance(RepositoriesService.class, node)
             .repository(ProjectId.DEFAULT, repoName);
         snapshotRepo.setStrategy(readStrategy);
 
-        // Guard on the object store to ensure it does not attempt to read a deleted BCC
-        setNodeRepositoryStrategy(node, new AssertNoMissingMetadataBlobStrategy());
+        // Fail the test if the object store ever receives a SNAPSHOT_METADATA read on a deleted BCC.
+        setNodeRepositoryStrategy(node, new AssertNoMissingBlobStrategy());
 
-        // Start the snapshot, wait for the it to start
+        final var shardSnapshotAborted = observeShardSnapshotAborted(node, repoName, shardId0);
+
         final var snapshotFuture = client().admin()
             .cluster()
             .prepareCreateSnapshot(TEST_REQUEST_TIMEOUT, repoName, "snap-before-metadata-read")
@@ -675,15 +734,46 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
             .setWaitForCompletion(true)
             .execute();
         safeAwait(readStrategy.readObserved);
-        // Now delete the index to trigger commit release and shard snapshot abort
+        // Delete the index while the shard snapshot is blocked before metadataSnapshot. This should trigger snapshot abort.
         safeGet(client().admin().indices().prepareDelete(indexName).execute());
 
+        // Index deletion itself does not release the snapshot commit tracking when supportsRelocationDuringSnapshot is true
         final var snapshotsCommitService = internalCluster().getInstance(SnapshotsCommitService.class, node);
-        assertBusy(() -> assertFalse(snapshotsCommitService.hasTrackingForShard(shardId0)));
+        assertTrue(snapshotsCommitService.hasTrackingForShard(shardId0));
 
         readStrategy.proceed.countDown();
-        final var response = safeGet(snapshotFuture);
-        assertThat(response.getSnapshotInfo(), notNullValue());
+        // Shard snapshot should abort and fail
+        safeAwait(shardSnapshotAborted);
+        safeGet(snapshotFuture);
+        // Retained commit tracking is released by SnapshotsCommitService.clusterChanged once the snapshot is done.
+        assertBusy(() -> assertFalse(snapshotsCommitService.hasTrackingForShard(shardId0)));
+    }
+
+    private SubscribableListener<Void> observeShardSnapshotAborted(String node, String repoName, ShardId shardId) {
+        return ClusterServiceUtils.addTemporaryStateListener(internalCluster().getInstance(ClusterService.class, node), state -> {
+            final var shardStatus = SnapshotsInProgress.get(state)
+                .forRepo(ProjectId.DEFAULT, repoName)
+                .stream()
+                .findFirst()
+                .map(entry -> entry.shards().get(shardId))
+                .orElse(null);
+            return shardStatus != null
+                && shardStatus.state() == SnapshotsInProgress.ShardState.FAILED
+                && "aborted".equals(shardStatus.reason());
+        });
+    }
+
+    /** Completes when {@code shardId} reaches {@code FAILED} (with any reason) in the given repo's entry. */
+    private SubscribableListener<Void> observeShardSnapshotFailed(String node, String repoName, ShardId shardId) {
+        return ClusterServiceUtils.addTemporaryStateListener(internalCluster().getInstance(ClusterService.class, node), state -> {
+            final var shardStatus = SnapshotsInProgress.get(state)
+                .forRepo(ProjectId.DEFAULT, repoName)
+                .stream()
+                .findFirst()
+                .map(entry -> entry.shards().get(shardId))
+                .orElse(null);
+            return shardStatus != null && shardStatus.state() == SnapshotsInProgress.ShardState.FAILED;
+        });
     }
 
     public void testSnapshotFailsCleanlyWhenShardClosesDuringRestart() {
@@ -751,11 +841,11 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
     }
 
     /**
-     * Asserts that any {@link OperationPurpose#SNAPSHOT_METADATA} read which reaches the underlying blob store does not
+     * Asserts that any snapshot metadata or data read which reaches the underlying blob store does not
      * surface a {@link NoSuchFileException}. Installed on the object store, this catches the race where a concurrently
      * deleted index removes a BCC blob while the snapshot process is reading it.
      */
-    private static class AssertNoMissingMetadataBlobStrategy extends StatelessMockRepositoryStrategy {
+    private static class AssertNoMissingBlobStrategy extends StatelessMockRepositoryStrategy {
         @Override
         public InputStream blobContainerReadBlob(
             CheckedSupplier<InputStream, IOException> originalSupplier,
@@ -765,8 +855,8 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
             try {
                 return super.blobContainerReadBlob(originalSupplier, purpose, blobName);
             } catch (NoSuchFileException e) {
-                if (purpose == OperationPurpose.SNAPSHOT_METADATA) {
-                    throw new AssertionError("unexpected NoSuchFileException for snapshot metadata blob [" + blobName + "]", e);
+                if (purpose == OperationPurpose.SNAPSHOT_METADATA || purpose == OperationPurpose.SNAPSHOT_DATA) {
+                    throw new AssertionError("unexpected NoSuchFileException for snapshot blob [" + blobName + "]", e);
                 }
                 throw e;
             }
@@ -783,15 +873,15 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
             try {
                 return super.blobContainerReadBlob(originalSupplier, purpose, blobName, position, length);
             } catch (NoSuchFileException e) {
-                if (purpose == OperationPurpose.SNAPSHOT_METADATA) {
-                    throw new AssertionError("unexpected NoSuchFileException for snapshot metadata blob [" + blobName + "]", e);
+                if (purpose == OperationPurpose.SNAPSHOT_METADATA || purpose == OperationPurpose.SNAPSHOT_DATA) {
+                    throw new AssertionError("unexpected NoSuchFileException for snapshot blob [" + blobName + "]", e);
                 }
                 throw e;
             }
         }
     }
 
-    private class BlockingMetadataReadStrategy extends AssertNoMissingMetadataBlobStrategy {
+    private class BlockingMetadataReadStrategy extends AssertNoMissingBlobStrategy {
         final CountDownLatch readObserved;
         final CountDownLatch proceed = new CountDownLatch(1);
 
@@ -840,13 +930,28 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
         return nDocs;
     }
 
+    private record IndexPair(String indexA, String indexB, ShardId shardIdA, ShardId shardIdB) {}
+
+    /** Creates two single-shard indices whose primaries are kept off {@code excludeNode}, indexes some docs, and
+     *  resolves the corresponding {@link ShardId}s. */
+    private IndexPair createTwoIndicesExcluding(String excludeNode) {
+        final var indexA = randomIdentifier("a");
+        final var indexB = randomIdentifier("b");
+        createIndex(indexA, indexSettings(1, 0).put("index.routing.allocation.exclude._name", excludeNode).build());
+        createIndex(indexB, indexSettings(1, 0).put("index.routing.allocation.exclude._name", excludeNode).build());
+        ensureGreen(indexA, indexB);
+        indexAndMaybeFlush(indexA);
+        indexAndMaybeFlush(indexB);
+        return new IndexPair(indexA, indexB, new ShardId(resolveIndex(indexA), 0), new ShardId(resolveIndex(indexB), 0));
+    }
+
     /**
      * Stateless plugin that wraps the engine's {@link IndexStorePlugin.SnapshotCommitSupplier} so tests can inject a runnable that
      * executes after the underlying {@code acquireIndexCommitForSnapshot} returns. Used to reliably reproduce races between commit
      * acquisition and shard relocation.
      */
     public static class SnapshotCommitInterceptPlugin extends TestUtils.StatelessPluginWithTrialLicense {
-        final AtomicReference<Runnable> afterAcquireForSnapshot = new AtomicReference<>();
+        final Map<ShardId, Runnable> afterAcquireForSnapshot = new ConcurrentHashMap<>();
 
         public SnapshotCommitInterceptPlugin(Settings settings) {
             super(settings);
@@ -856,9 +961,10 @@ public class StatelessSnapshotIT extends AbstractStatelessPluginIntegTestCase {
         public Optional<EngineFactory> getEngineFactory(IndexSettings indexSettings) {
             return super.getEngineFactory(indexSettings).map(factory -> engineConfig -> {
                 final var delegate = engineConfig.getSnapshotCommitSupplier();
+                final var shardId = engineConfig.getShardId();
                 final IndexStorePlugin.SnapshotCommitSupplier wrappedCommitSupplier = engine -> {
                     final var commitRef = delegate.acquireIndexCommitForSnapshot(engine);
-                    final var hook = afterAcquireForSnapshot.get();
+                    final var hook = afterAcquireForSnapshot.get(shardId);
                     if (hook != null) {
                         hook.run();
                     }

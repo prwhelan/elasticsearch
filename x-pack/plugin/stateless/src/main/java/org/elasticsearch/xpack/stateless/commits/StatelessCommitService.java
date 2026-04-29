@@ -1005,6 +1005,10 @@ public class StatelessCommitService extends AbstractLifecycleComponent implement
         return getSafe(shardsCommitsStates, shardId).isClosed();
     }
 
+    public boolean isShardDeletingIndex(ShardId shardId) {
+        return getSafe(shardsCommitsStates, shardId).isDeletingIndex();
+    }
+
     public void unregister(ShardId shardId) {
         ShardCommitState removed = shardsCommitsStates.remove(shardId);
         assert removed != null : shardId + " not registered";
@@ -2517,6 +2521,10 @@ public class StatelessCommitService extends AbstractLifecycleComponent implement
 
         public void markIndexDeleting() {
             isDeletingIndex = true;
+        }
+
+        public boolean isDeletingIndex() {
+            return isDeletingIndex;
         }
 
         /**

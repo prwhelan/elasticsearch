@@ -409,6 +409,9 @@ tests:
 - class: org.elasticsearch.cluster.routing.IndexRoutingTests
   method: testRequiredRoutingUsesSliceMessageWhenSliceEnabled
   issue: https://github.com/elastic/elasticsearch/issues/147777
+- class: org.elasticsearch.search.runtime.GeoPointScriptFieldExistsQueryTests
+  method: testEqualsAndHashCode
+  issue: https://github.com/elastic/elasticsearch/issues/147778
 
 # Examples:
 #

@@ -529,3 +529,6 @@ tests:
 - class: org.elasticsearch.xpack.security.authc.HttOptionsNoAuthnIntegTests
   method: testNoAuthnForPreFlightRequest
   issue: https://github.com/elastic/elasticsearch/issues/147898
+- class: org.elasticsearch.xpack.security.authc.HttOptionsNoAuthnIntegTests
+  method: testNoAuthnForResourceOptionsMethod
+  issue: https://github.com/elastic/elasticsearch/issues/147899

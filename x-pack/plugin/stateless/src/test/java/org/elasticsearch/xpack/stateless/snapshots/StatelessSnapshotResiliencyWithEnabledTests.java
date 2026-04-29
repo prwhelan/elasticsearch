@@ -41,6 +41,7 @@ public class StatelessSnapshotResiliencyWithEnabledTests extends StatelessSnapsh
                         StatelessSnapshotSettings.STATELESS_SNAPSHOT_ENABLED_SETTING.getKey(),
                         StatelessSnapshotSettings.StatelessSnapshotEnabledStatus.ENABLED
                     )
+                    .put(StatelessSnapshotSettings.RELOCATION_DURING_SNAPSHOT_ENABLED_SETTING.getKey(), randomBoolean())
                     .build();
             }
         };

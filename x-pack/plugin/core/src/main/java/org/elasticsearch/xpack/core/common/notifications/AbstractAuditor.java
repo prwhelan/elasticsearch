@@ -135,7 +135,7 @@ public abstract class AbstractAuditor<T extends AbstractAuditMessage> {
             }
 
         }, e -> {
-            logger.warn("Failed to create audit index and alias after [{}] attempts", 1 + MAX_WRITE_RETRIES, e);
+            logger.atWarn().withThrowable(e).log("Failed to create audit index and alias after [{}] attempts", 1 + MAX_WRITE_RETRIES);
             indexAndAliasCreationInProgress.set(false);
         });
 

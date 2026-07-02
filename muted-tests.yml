@@ -844,3 +844,12 @@ tests:
 - class: org.elasticsearch.xpack.stateless.StatelessHollowIndexShardsIT
   method: testCloseWhileShardsAreHollowed
   issue: https://github.com/elastic/elasticsearch/issues/151861
+- class: org.elasticsearch.xpack.encryption.KeyRotationIT
+  method: testConsecutiveRotations
+  issue: https://github.com/elastic/elasticsearch/issues/152472
+- class: org.elasticsearch.xpack.inference.mapper.SemanticTextFieldMapperTests
+  method: testSupportsParsingObject {p0=true p1=BASIC}
+  issue: https://github.com/elastic/elasticsearch/issues/152790
+- class: org.elasticsearch.xpack.inference.mapper.SemanticTextFieldMapperTests
+  method: testSupportsParsingObject {p0=true p1=ENTERPRISE}
+  issue: https://github.com/elastic/elasticsearch/issues/152791

@@ -8,13 +8,16 @@
 package org.elasticsearch.xpack.esql.datasource.gcs;
 
 import com.google.auth.Credentials;
+import com.google.auth.oauth2.ComputeEngineCredentials;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.storage.Storage;
 
 import org.elasticsearch.action.ActionListener;
+import org.elasticsearch.common.ValidationException;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.workloadidentity.spi.WorkloadIdentityIssuerClient;
 import org.elasticsearch.workloadidentity.spi.WorkloadIdentityRegistry;
+import org.elasticsearch.xpack.esql.datasources.spi.FileDataSourceConfiguration.AuthMode;
 import org.elasticsearch.xpack.esql.datasources.spi.StoragePath;
 
 import java.util.List;
@@ -159,31 +162,61 @@ public class GcsStorageProviderTests extends ESTestCase {
 
     public void testCredentialsFromAccessToken() throws Exception {
         GcsConfiguration config = GcsConfiguration.fromMap(Map.of("access_token", "ya29.token"));
-        Credentials creds = GcsStorageProvider.credentials(config);
-        assertThat(creds, instanceOf(GoogleCredentials.class));
-        assertEquals("ya29.token", ((GoogleCredentials) creds).getAccessToken().getTokenValue());
+        assertEquals(AuthMode.STATIC_CREDENTIALS, config.resolveAuthMode());
+        GoogleCredentials creds = GcsStorageProvider.buildStaticCredentials(config);
+        assertEquals("ya29.token", creds.getAccessToken().getTokenValue());
     }
 
-    public void testCredentialsRequiresCredentials() {
-        GcsConfiguration config = GcsConfiguration.fromMap(Map.of("project_id", "my-project"));
-        IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> GcsStorageProvider.credentials(config));
+    public void testCredentialsRequiresCredentialsRejectedAtCreate() {
+        // auth=auto with no credentials, no keyless settings resolves to nothing, so it is rejected at create time.
+        ValidationException e = expectThrows(ValidationException.class, () -> GcsConfiguration.fromMap(Map.of("project_id", "my-project")));
         assertTrue(e.getMessage().contains("GCS data source requires credentials"));
     }
 
     public void testEmptyAccessTokenTreatedAsAbsent() {
-        // An empty access token is treated as absent rather than building OAuth credentials with an empty token.
-        GcsConfiguration config = GcsConfiguration.fromMap(Map.of("access_token", "", "project_id", "my-project"));
-        assertFalse(config.hasCredentials());
-        IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> GcsStorageProvider.credentials(config));
+        // An empty access token is treated as absent rather than building OAuth credentials with an empty token, so
+        // auth=auto has nothing to resolve and is rejected at create time.
+        ValidationException e = expectThrows(
+            ValidationException.class,
+            () -> GcsConfiguration.fromMap(Map.of("access_token", "", "project_id", "my-project"))
+        );
         assertTrue(e.getMessage().contains("GCS data source requires credentials"));
     }
 
     public void testWhitespaceServiceAccountTreatedAsAbsent() {
         // A whitespace-only service-account credentials blob is treated as absent (consistent with the
         // access_token path) rather than handed to ServiceAccountCredentials.fromStream as garbage JSON.
-        GcsConfiguration config = GcsConfiguration.fromMap(Map.of("credentials", "   ", "project_id", "my-project"));
-        assertFalse(config.hasCredentials());
-        IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> GcsStorageProvider.credentials(config));
+        ValidationException e = expectThrows(
+            ValidationException.class,
+            () -> GcsConfiguration.fromMap(Map.of("credentials", "   ", "project_id", "my-project"))
+        );
         assertTrue(e.getMessage().contains("GCS data source requires credentials"));
+    }
+
+    /**
+     * auth=managed_identity resolves to MANAGED_IDENTITY and the switch arm builds {@link ComputeEngineCredentials}
+     * from the production seam.
+     */
+    public void testManagedIdentityCredentialsReturnsComputeEngine() throws Exception {
+        GcsConfiguration config = GcsConfiguration.fromMap(Map.of("auth", "managed_identity"));
+        assertEquals(AuthMode.MANAGED_IDENTITY, config.resolveAuthMode());
+        Credentials creds = new GcsStorageProvider(mockStorage).buildManagedIdentityCredentials();
+        assertThat(creds, instanceOf(ComputeEngineCredentials.class));
+    }
+
+    /**
+     * {@link GcsStorageProvider#buildManagedIdentityCredentials()} — the seam the MANAGED_IDENTITY switch arm calls —
+     * is overridable, so tests can inject a credential backed by a mock HTTP transport instead of the GCE metadata
+     * server. Verifies the override is honored; the arm→seam routing is exercised end-to-end by the ITs.
+     */
+    public void testManagedIdentityCredentialsSeamIsOverridable() throws Exception {
+        GoogleCredentials injected = GoogleCredentials.create(new com.google.auth.oauth2.AccessToken("seam-token", null));
+        GcsStorageProvider provider = new GcsStorageProvider(mockStorage) {
+            @Override
+            protected Credentials buildManagedIdentityCredentials() {
+                return injected;
+            }
+        };
+        assertSame(injected, provider.buildManagedIdentityCredentials());
     }
 }

@@ -16,8 +16,10 @@ import org.elasticsearch.xpack.esql.datasource.csv.CsvDataSourcePlugin;
 import org.elasticsearch.xpack.esql.datasource.http.HttpDataSourcePlugin;
 import org.elasticsearch.xpack.esql.datasource.ndjson.NdJsonDataSourcePlugin;
 import org.elasticsearch.xpack.esql.datasources.AsyncExternalSourceOperator;
+import org.elasticsearch.xpack.esql.datasources.ExternalSourceSettings;
 import org.elasticsearch.xpack.esql.datasources.spi.StoragePath;
 import org.elasticsearch.xpack.esql.plugin.QueryPragmas;
+import org.junit.Before;
 
 import java.io.BufferedWriter;
 import java.nio.file.Files;
@@ -34,8 +36,8 @@ import static org.hamcrest.Matchers.equalTo;
 /**
  * End-to-end regression test for ES|QL EXTERNAL aggregations over an uncompressed multi-file CSV/NDJSON
  * glob. Such reads route through {@code SEGMENTABLE_UNCOMPRESSED} → {@code ParallelParsingCoordinator} →
- * {@code OrderedParallelIterator}, which the fix changed to dispatch byte-range segments in a sliding
- * window bounded by the {@code max_concurrent_open_segments} pragma.
+ * {@code AsReadyParallelIterator}, which dispatches byte-range segments in a sliding window bounded by the
+ * {@code max_concurrent_open_segments} pragma and emits their pages as they complete.
  * <p>
  * To actually exercise that path (rather than the single-threaded fallback), each file must be split into
  * several intra-file segments: {@code ParallelParsingCoordinator.parallelRead} only segments when the read
@@ -78,6 +80,19 @@ public class ExternalUncompressedMultiFileSegmentCapIT extends AbstractEsqlInteg
         plugins.add(CsvDataSourcePlugin.class);
         plugins.add(NdJsonDataSourcePlugin.class);
         return plugins;
+    }
+
+    @Override
+    protected Settings nodeSettings(int nodeOrdinal, Settings otherSettings) {
+        return Settings.builder()
+            .put(super.nodeSettings(nodeOrdinal, otherSettings))
+            .putList(ExternalSourceSettings.LOCAL_ALLOWED_PATHS.getKey(), createTempDir().getParent().toString())
+            .build();
+    }
+
+    @Before
+    public void requireLocalFilesEnabled() {
+        assumeTrue("requires local filesystem feature flag", HttpDataSourcePlugin.ESQL_EXTERNAL_DATASOURCES_LOCAL_FEATURE_FLAG.isEnabled());
     }
 
     @Override

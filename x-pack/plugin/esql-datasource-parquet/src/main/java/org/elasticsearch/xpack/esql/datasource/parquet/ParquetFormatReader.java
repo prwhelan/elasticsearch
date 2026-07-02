@@ -43,7 +43,6 @@ import org.elasticsearch.compute.operator.CloseableIterator;
 import org.elasticsearch.core.Releasables;
 import org.elasticsearch.logging.LogManager;
 import org.elasticsearch.logging.Logger;
-import org.elasticsearch.xpack.esql.core.QlIllegalArgumentException;
 import org.elasticsearch.xpack.esql.core.expression.Attribute;
 import org.elasticsearch.xpack.esql.core.expression.Nullability;
 import org.elasticsearch.xpack.esql.core.expression.ReferenceAttribute;
@@ -62,8 +61,10 @@ import org.elasticsearch.xpack.esql.datasources.spi.DynamicThresholdAware;
 import org.elasticsearch.xpack.esql.datasources.spi.FilterPushdownSupport;
 import org.elasticsearch.xpack.esql.datasources.spi.FormatReadContext;
 import org.elasticsearch.xpack.esql.datasources.spi.FormatReader;
+import org.elasticsearch.xpack.esql.datasources.spi.PassThroughRowPositionStrategy;
 import org.elasticsearch.xpack.esql.datasources.spi.RangeAwareFormatReader;
 import org.elasticsearch.xpack.esql.datasources.spi.RangeReadContext;
+import org.elasticsearch.xpack.esql.datasources.spi.RowPositionStrategy;
 import org.elasticsearch.xpack.esql.datasources.spi.SimpleSourceMetadata;
 import org.elasticsearch.xpack.esql.datasources.spi.SkipWarnings;
 import org.elasticsearch.xpack.esql.datasources.spi.SourceMetadata;
@@ -73,9 +74,6 @@ import org.elasticsearch.xpack.esql.type.EsqlDataTypeConverter;
 
 import java.io.IOException;
 import java.math.BigInteger;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
@@ -156,18 +154,22 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
     }
 
     /**
-     * Resolves the {@link ColumnInfo} for a top-level column by name within a parquet
-     * {@link MessageType}, applying the same primitive-type mapping that the iterator uses
-     * (see {@link #convertParquetTypeToEsql}). Returns {@code null} when the column is absent
-     * or maps to {@link DataType#UNSUPPORTED} / {@link DataType#NULL}. The returned descriptor
-     * carries {@code maxRepetitionLevel} so callers can route flat vs list paths off of it.
+     * Resolves the {@link ColumnInfo} for a column by name within a parquet {@link MessageType},
+     * applying the same primitive-type mapping that the iterator uses (see
+     * {@link #convertParquetTypeToEsql}). Returns {@code null} when the column is absent or maps
+     * to {@link DataType#UNSUPPORTED} / {@link DataType#NULL}. The returned descriptor carries
+     * {@code maxRepetitionLevel} so callers can route flat vs list paths off of it.
+     * <p>
+     * {@code columnName} may be a dotted struct-leaf path (e.g. {@code "event.action"}) — the
+     * same D2 resolution rule as {@link #resolveFieldType} applies: literal top-level match wins
+     * over dotted-path traversal.
      * <p>
      * Package-private because {@link ParquetColumnExtractor} is the only collaborator and we
      * deliberately keep this primitive-type mapping single-sourced — duplicating it in the
      * extractor risks subtle type drift the next time a logical type is added.
      */
     static ColumnInfo resolveColumnInfo(MessageType schema, String columnName) {
-        Type field = schema.containsField(columnName) ? schema.getType(columnName) : null;
+        Type field = resolveFieldType(schema, columnName);
         if (field == null) {
             return null;
         }
@@ -175,13 +177,15 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
         if (esqlType == DataType.UNSUPPORTED || esqlType == DataType.NULL) {
             return null;
         }
-        // For flat columns the descriptor lives directly under the schema; for LIST<primitive>
-        // the descriptor is the inner repeated element. Iterate columns once and pick the
-        // descriptor whose top-level path segment matches the requested column name.
+        // For top-level columns (flat scalars, literal-dot names, LIST<primitive>) match the
+        // descriptor by first path segment. For dotted struct-leaf columns (e.g. "event.action")
+        // the first segment is the struct name, not the full dotted attribute name, so match by
+        // the full joined path instead.
+        boolean isTopLevel = schema.containsField(columnName);
         ColumnDescriptor descriptor = null;
         for (ColumnDescriptor desc : schema.getColumns()) {
             String[] path = desc.getPath();
-            if (path.length > 0 && path[0].equals(columnName)) {
+            if (isTopLevel ? (path.length > 0 && path[0].equals(columnName)) : String.join(".", path).equals(columnName)) {
                 descriptor = desc;
                 break;
             }
@@ -595,13 +599,14 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
                     return a;
                 });
                 if (stats.hasNonNullValue()) {
-                    mins.merge(colName, new Comparable[] { (Comparable) normalizeStatValue(stats.genericGetMin()) }, (a, b) -> {
+                    PrimitiveType pt = col.getPrimitiveType();
+                    mins.merge(colName, new Comparable[] { (Comparable) normalizeStatValue(stats.genericGetMin(), pt) }, (a, b) -> {
                         @SuppressWarnings("unchecked")
                         int cmp = a[0].compareTo(b[0]);
                         if (cmp > 0) a[0] = b[0];
                         return a;
                     });
-                    maxs.merge(colName, new Comparable[] { (Comparable) normalizeStatValue(stats.genericGetMax()) }, (a, b) -> {
+                    maxs.merge(colName, new Comparable[] { (Comparable) normalizeStatValue(stats.genericGetMax(), pt) }, (a, b) -> {
                         @SuppressWarnings("unchecked")
                         int cmp = a[0].compareTo(b[0]);
                         if (cmp < 0) a[0] = b[0];
@@ -772,6 +777,13 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
     }
 
     @Override
+    public RowPositionStrategy rowPositionStrategy() {
+        // The parquet-mr iterator fills the {@code _rowPosition} slot natively from the file-global
+        // row index it tracks through the row-group page reader.
+        return PassThroughRowPositionStrategy.INSTANCE;
+    }
+
+    @Override
     public void close() throws IOException {
         // No resources to close at the reader level
     }
@@ -822,8 +834,9 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
             }
             stats.put(SourceStatisticsSerializer.columnNullCountKey(colName), colStats.getNumNulls());
             if (colStats.hasNonNullValue()) {
-                stats.put(SourceStatisticsSerializer.columnMinKey(colName), normalizeStatValue(colStats.genericGetMin()));
-                stats.put(SourceStatisticsSerializer.columnMaxKey(colName), normalizeStatValue(colStats.genericGetMax()));
+                PrimitiveType pt = col.getPrimitiveType();
+                stats.put(SourceStatisticsSerializer.columnMinKey(colName), normalizeStatValue(colStats.genericGetMin(), pt));
+                stats.put(SourceStatisticsSerializer.columnMaxKey(colName), normalizeStatValue(colStats.genericGetMax(), pt));
             }
         }
         return Map.copyOf(stats);
@@ -831,10 +844,14 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
 
     /**
      * Normalizes Parquet-specific stat values to types that Elasticsearch can serialize.
-     * Parquet {@link Binary} (used for BYTE_ARRAY / string columns) is converted to String;
-     * these must be converted to {@code String} before entering the metadata map.
+     * Temporal types (date32, timestamp, INT96) are decoded to epoch-millis.
+     * Parquet {@link Binary} (used for BYTE_ARRAY / string columns) is converted to String.
      */
-    private static Object normalizeStatValue(Object value) {
+    private static Object normalizeStatValue(Object value, PrimitiveType primitiveType) {
+        Long temporal = ParquetColumnDecoding.decodeTemporalStat(value, primitiveType);
+        if (temporal != null) {
+            return temporal;
+        }
         if (value instanceof Binary binary) {
             return binary.toStringUsingUTF8();
         }
@@ -1153,106 +1170,177 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
         if (predicateColumnPaths != null) {
             counters.addPredicateColumns(predicateColumnPaths);
         }
-        PreloadedRowGroupMetadata preloadedMetadata = PreloadedRowGroupMetadata.preload(reader, storageObject, predicateColumnPaths);
-        adapter.installPreWarmedChunks(preloadedMetadata.preWarmedChunks());
 
-        List<BlockMetaData> blocks;
-        boolean[] survivingRowGroups;
-        try {
-            blocks = reader.getRowGroups();
-            survivingRowGroups = computeSurvivingRowGroups(reader, blocks, recordFilter, projectedSchema, counters);
-        } finally {
-            // Detach the pre-warmed chunks from the adapter so subsequent reads on any
-            // WindowedSeekableInputStream skip the cache lookup. The ByteBuffers themselves remain
-            // reachable via preloadedMetadata for the iterator's lifetime, but the data path uses
-            // the async ColumnChunkPrefetcher rather than the sliding-window stream, so they have
-            // no further reader.
-            adapter.installPreWarmedChunks(null);
-        }
-
-        RowRanges[] allRowRanges = null;
-        if (filterPredicate != null) {
-            counters.markPageIndexUsed();
-            allRowRanges = new RowRanges[blocks.size()];
-            long rowsInKept = 0;
-            long rowsAfter = 0;
-            for (int i = 0; i < blocks.size(); i++) {
-                // Row groups dropped by stats/dictionary/bloom filters will never be opened by
-                // the iterator, so there is no need to compute their column-index row ranges.
-                if (survivingRowGroups != null && survivingRowGroups[i] == false) {
-                    continue;
-                }
-                long rgRows = blocks.get(i).getRowCount();
-                rowsInKept += rgRows;
-                allRowRanges[i] = ColumnIndexRowRangesComputer.compute(filterPredicate, preloadedMetadata, i, rgRows);
-                rowsAfter += allRowRanges[i] != null ? allRowRanges[i].selectedRowCount() : rgRows;
-            }
-            counters.addPageIndexRows(rowsInKept, rowsAfter);
-        }
-
-        // The iterator owns the late-mat decision: it gates on the structural prerequisite
-        // hasProjectionOnlyColumns (nothing to defer-decode otherwise) and gates the more expensive
-        // two-phase prefetch on its own predicate-byte-ratio threshold (see
-        // {@link OptimizedParquetColumnIterator#shouldUseTwoPhase} /
-        // {@link OptimizedParquetColumnIterator#TWO_PHASE_PREDICATE_BYTE_RATIO_THRESHOLD}). A second
-        // file-level byte-ratio gate here was a leftover from the Pushability.RECHECK era when every
-        // surviving row paid the predicate cost twice (once in late-mat, once again in FilterExec).
-        // With WildcardLike now pushed as Pushability.YES, FilterExec is dropped for that conjunct,
-        // so suppressing late-mat at the file level would leak unfiltered rows past the source.
-        ParquetPushedExpressions effectivePushed = lateMaterializationEnabled ? pushedExpressions : null;
-        if (effectivePushed != null) {
-            counters.markLateMaterializationUsed();
-        }
-
-        // Reuse the FilterPredicate already resolved at the file level so the trivially-passes
-        // guard sees the same predicate that drove row-group pruning and column-index RowRanges.
-        // Only pass it through when late materialization is actually active; otherwise the
-        // iterator has no use for it.
-        //
-        // Additionally suppress the predicate when any YES conjunct in pushedExpressions did not
-        // translate to a FilterPredicate (today: WildcardLike/Not(WildcardLike) AND'd with a
-        // translatable conjunct). The trivially-passes shortcut would bypass the late-mat
-        // evaluator on the strength of the FilterPredicate alone, but the missing YES conjunct
-        // is no longer in FilterExec to catch the over-inclusion — so dropping the guard here
-        // would silently leak rows that don't match the YES conjunct (e.g. URL LIKE "x*" rows
-        // outside the prefix when AND'd with a stats-trivial status = 200).
-        //
-        // DO NOT REMOVE the hasYesConjunctOutsideFilterPredicate check — it is load-bearing for
-        // correctness of YES-pushed predicates that have no parquet-FilterPredicate translation.
-        // The integration regression test
-        // OptimizedFilteredReaderTests.testPushedExpressionsLikeWithStatsTrivialEqDoesNotLeak
-        // and the unit tests in ParquetPushedExpressionsTests cover this contract.
-        MessageType fileSchema = reader.getFileMetaData().getSchema();
-        FilterPredicate triviallyPassesPredicate = effectivePushed != null
-            && filterPredicate != null
-            && (pushedExpressions == null || pushedExpressions.hasYesConjunctOutsideFilterPredicate(fileSchema) == false)
-                ? filterPredicate
-                : null;
-
-        return new OptimizedParquetColumnIterator(
-            reader,
-            projectedSchema,
-            projectedAttributes,
-            batchSize,
-            blockFactory,
-            rowLimit,
-            createdBy,
-            storageObject.path().toString(),
-            columnInfos,
-            preloadedMetadata,
-            storageObject,
-            allRowRanges,
-            survivingRowGroups,
-            rowGroupFirstRowGlobalOverride,
-            codecFactory,
-            effectivePushed,
-            triviallyPassesPredicate,
-            this,
-            fullFooter,
-            dynamicThreshold,
-            resolveDynamicThresholdColumn(fileSchema, dynamicThreshold),
-            counters
+        // Gate ColumnIndex/OffsetIndex prefetch to the columns a plan actually consumes (see
+        // computeIndexColumnPaths). A full scan with no filter and no threshold consumes none of
+        // them, so this emits zero index ranges.
+        IndexColumnPaths indexColumnPaths = computeIndexColumnPaths(
+            FilterCompat.isFilteringRequired(recordFilter),
+            filterPredicate != null,
+            predicateColumnPaths,
+            dynamicThreshold != null ? dynamicThreshold.columnName() : null,
+            projectedSchema
         );
+
+        PreloadedRowGroupMetadata preloadedMetadata = PreloadedRowGroupMetadata.preload(
+            reader,
+            storageObject,
+            predicateColumnPaths,
+            indexColumnPaths.columnIndexPaths(),
+            indexColumnPaths.offsetIndexPaths(),
+            blockFactory.arrowAllocator()
+        );
+        boolean metadataHandedOff = false;
+        try {
+            adapter.installPreWarmedChunks(preloadedMetadata.preWarmedChunks());
+
+            List<BlockMetaData> blocks;
+            boolean[] survivingRowGroups;
+            try {
+                blocks = reader.getRowGroups();
+                survivingRowGroups = computeSurvivingRowGroups(reader, blocks, recordFilter, projectedSchema, counters);
+            } finally {
+                // Detach the pre-warmed chunks from the adapter so subsequent reads on any
+                // WindowedSeekableInputStream skip the cache lookup. The ByteBuffers themselves remain
+                // reachable via preloadedMetadata for the iterator's lifetime, but the data path uses
+                // the async ColumnChunkPrefetcher rather than the sliding-window stream, so they have
+                // no further reader.
+                adapter.installPreWarmedChunks(null);
+            }
+
+            RowRanges[] allRowRanges = null;
+            if (filterPredicate != null) {
+                counters.markPageIndexUsed();
+                allRowRanges = new RowRanges[blocks.size()];
+                long rowsInKept = 0;
+                long rowsAfter = 0;
+                for (int i = 0; i < blocks.size(); i++) {
+                    // Row groups dropped by stats/dictionary/bloom filters will never be opened by
+                    // the iterator, so there is no need to compute their column-index row ranges.
+                    if (survivingRowGroups != null && survivingRowGroups[i] == false) {
+                        continue;
+                    }
+                    long rgRows = blocks.get(i).getRowCount();
+                    rowsInKept += rgRows;
+                    allRowRanges[i] = ColumnIndexRowRangesComputer.compute(filterPredicate, preloadedMetadata, i, rgRows);
+                    rowsAfter += allRowRanges[i] != null ? allRowRanges[i].selectedRowCount() : rgRows;
+                }
+                counters.addPageIndexRows(rowsInKept, rowsAfter);
+            }
+
+            // The iterator owns the late-mat decision: it gates on the structural prerequisite
+            // hasProjectionOnlyColumns (nothing to defer-decode otherwise) and gates the more expensive
+            // two-phase prefetch on its own predicate-byte-ratio threshold (see
+            // {@link OptimizedParquetColumnIterator#shouldUseTwoPhase} /
+            // {@link OptimizedParquetColumnIterator#TWO_PHASE_PREDICATE_BYTE_RATIO_THRESHOLD}). A second
+            // file-level byte-ratio gate here was a leftover from the Pushability.RECHECK era when every
+            // surviving row paid the predicate cost twice (once in late-mat, once again in FilterExec).
+            // With WildcardLike now pushed as Pushability.YES, FilterExec is dropped for that conjunct,
+            // so suppressing late-mat at the file level would leak unfiltered rows past the source.
+            ParquetPushedExpressions effectivePushed = lateMaterializationEnabled ? pushedExpressions : null;
+            if (effectivePushed != null) {
+                counters.markLateMaterializationUsed();
+            }
+
+            // Reuse the FilterPredicate already resolved at the file level so the trivially-passes
+            // guard sees the same predicate that drove row-group pruning and column-index RowRanges.
+            // Only pass it through when late materialization is actually active; otherwise the
+            // iterator has no use for it.
+            //
+            // Additionally suppress the predicate when any YES conjunct in pushedExpressions did not
+            // translate to a FilterPredicate (today: WildcardLike/Not(WildcardLike) AND'd with a
+            // translatable conjunct). The trivially-passes shortcut would bypass the late-mat
+            // evaluator on the strength of the FilterPredicate alone, but the missing YES conjunct
+            // is no longer in FilterExec to catch the over-inclusion — so dropping the guard here
+            // would silently leak rows that don't match the YES conjunct (e.g. URL LIKE "x*" rows
+            // outside the prefix when AND'd with a stats-trivial status = 200).
+            //
+            // DO NOT REMOVE the hasYesConjunctOutsideFilterPredicate check — it is load-bearing for
+            // correctness of YES-pushed predicates that have no parquet-FilterPredicate translation.
+            // The integration regression test
+            // OptimizedFilteredReaderTests.testPushedExpressionsLikeWithStatsTrivialEqDoesNotLeak
+            // and the unit tests in ParquetPushedExpressionsTests cover this contract.
+            MessageType fileSchema = reader.getFileMetaData().getSchema();
+            FilterPredicate triviallyPassesPredicate = effectivePushed != null
+                && filterPredicate != null
+                && (pushedExpressions == null || pushedExpressions.hasYesConjunctOutsideFilterPredicate(fileSchema) == false)
+                    ? filterPredicate
+                    : null;
+
+            OptimizedParquetColumnIterator iterator = new OptimizedParquetColumnIterator(
+                reader,
+                projectedSchema,
+                projectedAttributes,
+                batchSize,
+                blockFactory,
+                rowLimit,
+                createdBy,
+                storageObject.path().toString(),
+                columnInfos,
+                preloadedMetadata,
+                storageObject,
+                allRowRanges,
+                survivingRowGroups,
+                rowGroupFirstRowGlobalOverride,
+                codecFactory,
+                effectivePushed,
+                triviallyPassesPredicate,
+                this,
+                fullFooter,
+                dynamicThreshold,
+                resolveDynamicThresholdColumn(fileSchema, dynamicThreshold),
+                counters
+            );
+            // Constructor succeeded — iterator now owns preloadedMetadata. Set the flag after
+            // construction so that a throw inside the constructor does not suppress cleanup.
+            metadataHandedOff = true;
+            return iterator;
+        } finally {
+            if (metadataHandedOff == false) {
+                preloadedMetadata.close();
+            }
+        }
+    }
+
+    /**
+     * The dot-string column paths whose ColumnIndex / OffsetIndex should be prefetched. A
+     * {@code null} set means "unrestricted" — fetch the index for every column (legacy behavior).
+     */
+    record IndexColumnPaths(Set<String> columnIndexPaths, Set<String> offsetIndexPaths) {}
+
+    /**
+     * Restricts page-index prefetch to the columns a plan actually consumes, so a full scan does not
+     * pay for ColumnIndex/OffsetIndex bytes nothing reads. Index ranges are only used when a Parquet
+     * {@link FilterPredicate} drives {@code RowRanges} ({@code pageRangeFilterActive}) or for the
+     * dynamic-threshold sort column. Returns {@code null} sets (unrestricted, legacy behavior) when a
+     * filter is active but its predicate columns can't be enumerated ({@code predicateColumnPaths == null}).
+     */
+    static IndexColumnPaths computeIndexColumnPaths(
+        boolean filteringRequired,
+        boolean pageRangeFilterActive,
+        Set<String> predicateColumnPaths,
+        String thresholdColumn,
+        MessageType projectedSchema
+    ) {
+        if (filteringRequired && predicateColumnPaths == null) {
+            return new IndexColumnPaths(null, null);
+        }
+        Set<String> columnIndexPaths = new HashSet<>();
+        Set<String> offsetIndexPaths = new HashSet<>();
+        if (pageRangeFilterActive && predicateColumnPaths != null) {
+            columnIndexPaths.addAll(predicateColumnPaths);
+            offsetIndexPaths.addAll(predicateColumnPaths);
+        }
+        if (thresholdColumn != null) {
+            columnIndexPaths.add(thresholdColumn);
+            offsetIndexPaths.add(thresholdColumn);
+        }
+        if (pageRangeFilterActive) {
+            for (ColumnDescriptor descriptor : projectedSchema.getColumns()) {
+                offsetIndexPaths.add(String.join(".", descriptor.getPath()));
+            }
+        }
+        return new IndexColumnPaths(columnIndexPaths, offsetIndexPaths);
     }
 
     private static ColumnDescriptor resolveDynamicThresholdColumn(MessageType schema, DynamicThreshold dynamicThreshold) {
@@ -1652,6 +1740,9 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
                     }
                 } else if (logical instanceof LogicalTypeAnnotation.DateLogicalTypeAnnotation) {
                     yield DataType.DATETIME;
+                } else if (logical instanceof LogicalTypeAnnotation.TimeLogicalTypeAnnotation) {
+                    // TIME_MILLIS: stored as INT32 but ESQL represents time values as LONG
+                    yield DataType.LONG;
                 } else if (logical instanceof LogicalTypeAnnotation.DecimalLogicalTypeAnnotation) {
                     yield DataType.DOUBLE;
                 }
@@ -1667,6 +1758,7 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
                 } else if (logical instanceof LogicalTypeAnnotation.DecimalLogicalTypeAnnotation) {
                     yield DataType.DOUBLE;
                 }
+                // TIME_MICROS/TIME_NANOS: both map to LONG; readColumnBlock scales TIME_MICROS ×1_000
                 yield DataType.LONG;
             }
             case INT96 -> DataType.DATETIME;
@@ -1677,6 +1769,14 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
                 }
                 if (logical instanceof LogicalTypeAnnotation.Float16LogicalTypeAnnotation) {
                     yield DataType.DOUBLE;
+                }
+                if (logical instanceof LogicalTypeAnnotation.BsonLogicalTypeAnnotation) {
+                    yield DataType.UNSUPPORTED;
+                }
+                if (logical instanceof LogicalTypeAnnotation.IntervalLogicalTypeAnnotation) {
+                    // INTERVAL is 12 bytes representing months+days+ms layout and had no single ESQL equivalent:
+                    // DATE_PERIOD is year/quarter/months/week/days, and TIME_DURATION is hours/minutes/secs/millis.
+                    yield DataType.UNSUPPORTED;
                 }
                 yield DataType.KEYWORD;
             }
@@ -1701,11 +1801,6 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
         }
         return DataType.UNSUPPORTED;
     }
-
-    private static final long MILLIS_PER_DAY = Duration.ofDays(1).toMillis();
-    private static final long NANOS_PER_MILLI = 1_000_000L;
-    /** Julian day number for Unix epoch (1970-01-01). */
-    private static final int JULIAN_EPOCH_OFFSET = 2_440_588;
 
     /**
      * When the query plan type cannot be satisfied from this file's Parquet-derived ESQL type (after
@@ -1910,7 +2005,7 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
             try {
                 return advanceRowGroup();
             } catch (IOException e) {
-                throw new ElasticsearchException(
+                throw new IllegalArgumentException(
                     "Failed to read Parquet row group [" + (rowGroupOrdinal + 1) + "] in file [" + fileLocation + "]: " + e.getMessage(),
                     e
                 );
@@ -2024,10 +2119,13 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
                             } else {
                                 blocks[col] = readColumnBlock(columnReaders[col], info, rowsToRead, col);
                             }
+                        } catch (CircuitBreakingException e) {
+                            Releasables.closeExpectNoException(blocks);
+                            throw e;
                         } catch (Exception e) {
                             Releasables.closeExpectNoException(blocks);
                             Attribute attr = attributes.get(col);
-                            throw new ElasticsearchException(
+                            throw new IllegalArgumentException(
                                 "Failed to read Parquet column ["
                                     + attr.name()
                                     + "] (type "
@@ -2045,11 +2143,11 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
                         }
                     }
                 }
-            } catch (ElasticsearchException e) {
+            } catch (IllegalArgumentException | CircuitBreakingException e) {
                 throw e;
             } catch (Exception e) {
                 Releasables.closeExpectNoException(blocks);
-                throw new ElasticsearchException(
+                throw new IllegalArgumentException(
                     "Failed to create Page batch at row group ["
                         + (rowGroupOrdinal + 1)
                         + "] page batch ["
@@ -2081,6 +2179,13 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
                 case BOOLEAN -> readBooleanColumn(cr, info.maxDefLevel(), rowsToRead);
                 case INTEGER -> readIntColumn(cr, info.maxDefLevel(), rowsToRead);
                 case LONG, UNSIGNED_LONG -> {
+                    if (info.logicalType() instanceof LogicalTypeAnnotation.TimeLogicalTypeAnnotation time) {
+                        if (info.parquetType() == PrimitiveType.PrimitiveTypeName.INT32) {
+                            // TIME_MILLIS: physical INT32, widen to long (raw ms value, no unit conversion)
+                            yield readInt32WidenedToLongColumn(cr, info.maxDefLevel(), rowsToRead, true);
+                        }
+                        yield readLongColumn(cr, info.maxDefLevel(), rowsToRead, ParquetColumnDecoding.timeNanoMultiplier(time), false);
+                    }
                     var logicalType = (LogicalTypeAnnotation.IntLogicalTypeAnnotation) info.logicalType();
                     if (info.parquetType() == PrimitiveType.PrimitiveTypeName.INT32) {
                         // A plain INT32 with no logical-type annotation is historically "signed"
@@ -2091,7 +2196,10 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
                             logicalType == null || logicalType.isSigned()
                         );
                     }
-                    yield readLongColumn(cr, info.maxDefLevel(), rowsToRead);
+                    // A 64-bit unsigned column maps to UNSIGNED_LONG, which ESQL stores sign-flip-encoded
+                    // (value ^ 2^63) so signed-long ordering matches unsigned ordering. The output edge always
+                    // decodes UNSIGNED_LONG blocks, so the read path must emit the encoded form here.
+                    yield readLongColumn(cr, info.maxDefLevel(), rowsToRead, 1L, info.esqlType() == DataType.UNSIGNED_LONG);
                 }
                 case DOUBLE -> readDoubleColumn(cr, info, rowsToRead);
                 case KEYWORD, TEXT -> {
@@ -2164,7 +2272,17 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
             return ColumnBlockConversions.longColumn(blockFactory, values, rows, noNulls, false, isNull, false);
         }
 
-        private Block readLongColumn(ColumnReader cr, int maxDef, int rows) {
+        /**
+         * Reads a Parquet INT64 column into a {@code LONG}/{@code UNSIGNED_LONG} block.
+         *
+         * @param multiplier     factor applied to each value, used to normalize Parquet TIME_* units to nanoseconds
+         *                       ({@code 1L} when no conversion is needed).
+         * @param encodeUnsigned when {@code true} the column is an {@code unsigned_long}; each value is sign-flip-encoded
+         *                       ({@code value ^ 2^63}) before landing in the block, mirroring the indexing path so the
+         *                       always-decoding output edge produces the true unsigned value. Mutually exclusive with a
+         *                       non-unit {@code multiplier} (a column is either a TIME type or {@code unsigned_long}).
+         */
+        private Block readLongColumn(ColumnReader cr, int maxDef, int rows, long multiplier, boolean encodeUnsigned) {
             long[] values = UninitializedArrays.newLongArray(rows);
             BitSet isNull = maxDef > 0 ? new BitSet(rows) : null;
             boolean noNulls = true;
@@ -2173,7 +2291,8 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
                     isNull.set(i);
                     noNulls = false;
                 } else {
-                    values[i] = cr.getLong();
+                    long value = cr.getLong();
+                    values[i] = encodeUnsigned ? ParquetColumnDecoding.encodeUnsignedLong(value) : value * multiplier;
                 }
                 cr.consume();
             }
@@ -2217,7 +2336,7 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
                         case INT32 -> BigInteger.valueOf(cr.getInteger());
                         case INT64 -> BigInteger.valueOf(cr.getLong());
                         case BINARY, FIXED_LEN_BYTE_ARRAY -> new BigInteger(cr.getBinary().getBytes());
-                        default -> throw new QlIllegalArgumentException("Unexpected DECIMAL backing type: " + info.parquetType());
+                        default -> throw new IllegalArgumentException("Unexpected DECIMAL backing type: " + info.parquetType());
                     };
                     values[i] = new java.math.BigDecimal(unscaled, scale).doubleValue();
                 }
@@ -2278,20 +2397,15 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
                     isNull.set(i);
                     noNulls = false;
                 } else if (isDate) {
-                    values[i] = cr.getInteger() * MILLIS_PER_DAY;
+                    values[i] = ParquetColumnDecoding.dateDaysToMillis(cr.getInteger());
                 } else {
-                    long raw = cr.getLong();
-                    values[i] = ParquetColumnDecoding.convertTimestampToMillis(raw, info.logicalType());
+                    values[i] = ParquetColumnDecoding.convertTimestampToMillis(cr.getLong(), info.logicalType());
                 }
                 cr.consume();
             }
             return ColumnBlockConversions.longColumn(blockFactory, values, rows, noNulls, false, isNull, false);
         }
 
-        /**
-         * Converts a Parquet INT96 value (12 bytes: 8 bytes nanos-of-day LE + 4 bytes Julian day LE)
-         * to epoch milliseconds.
-         */
         private Block readInt96TimestampColumn(ColumnReader cr, int maxDef, int rows) {
             long[] values = UninitializedArrays.newLongArray(rows);
             BitSet isNull = maxDef > 0 ? new BitSet(rows) : null;
@@ -2301,12 +2415,8 @@ public class ParquetFormatReader implements RangeAwareFormatReader, ColumnExtrac
                     isNull.set(i);
                     noNulls = false;
                 } else {
-                    Binary bin = cr.getBinary();
-                    ByteBuffer buf = ByteBuffer.wrap(bin.getBytes()).order(ByteOrder.LITTLE_ENDIAN);
-                    long nanosOfDay = buf.getLong();
-                    int julianDay = buf.getInt();
-                    long epochDay = julianDay - JULIAN_EPOCH_OFFSET;
-                    values[i] = epochDay * MILLIS_PER_DAY + nanosOfDay / NANOS_PER_MILLI;
+                    byte[] bytes = cr.getBinary().getBytes();
+                    values[i] = ParquetColumnDecoding.int96ToEpochMillis(bytes, 0, bytes.length);
                 }
                 cr.consume();
             }

@@ -249,8 +249,31 @@ public interface BlockLoader {
         /**
          * Returns a {@link DocIdSetIterator} that matches documents whose value contains the given term,
          * or {@code null} if this optimization is not supported by the underlying data.
+         *
+         * <p>Implementations should return a {@link TwoPhaseIterator}-backed iterator (wrapped via
+         * {@link TwoPhaseIterator#asDocIdSetIterator}) so that Lucene's default BulkScorer drives the
+         * dense {@code approximation} forward and calls {@code matches()} per doc within the caller's
+         * {@code [min, max)} window — sub-segment slicing (e.g. {@code DataPartitioning.DOC}) then
+         * pays cost proportional to slice size, with no over-scan into adjacent slices when matches
+         * are sparse.
          */
         default DocIdSetIterator tryContainsIterator(BytesRef containsTerm) throws IOException {
+            return null;
+        }
+
+        /**
+         * Returns a {@link DocIdSetIterator} that matches documents whose value is exactly equal to
+         * the given term, or {@code null} if this optimization is not supported by the underlying data.
+         *
+         * <p>Implementations should return a {@link TwoPhaseIterator}-backed iterator (wrapped via
+         * {@link TwoPhaseIterator#asDocIdSetIterator}) — see the rationale on
+         * {@link #tryContainsIterator}.
+         *
+         * <p>This optimization is only valid for single-valued fields. Callers must gate on
+         * {@code countsSkipper == null || countsSkipper.maxValue() == 1} before invoking this method
+         * and fall back to the slow per-doc predicate path for multi-valued fields.
+         */
+        default DocIdSetIterator tryTermEqualIterator(BytesRef term) throws IOException {
             return null;
         }
     }
@@ -267,6 +290,21 @@ public interface BlockLoader {
      * The default implementation returns {@code null}, indicating no optimized iterator is available.
      */
     interface OptionalNumericRangeReader {
+        /**
+         * Returns a {@link DocIdSetIterator} matching documents whose numeric value falls in
+         * {@code [lowerValue, upperValue]}, or {@code null} if this optimization is not supported.
+         *
+         * <p>Implementations should override {@link DocIdSetIterator#intoBitSet} and
+         * {@link DocIdSetIterator#docIDRunEnd} (both honoring the caller's {@code upTo} bound)
+         * so Lucene's {@code DenseConjunctionBulkScorer} can bulk-collect dense ranges
+         * window-by-window — including a {@code bitSet.set(start, end+1)} fast path for
+         * skipper blocks that are entirely in range. These bulk overrides keep sub-segment
+         * slicing ({@code DataPartitioning.DOC}) linear while preserving the dense-range
+         * optimization on whole-leaf scans; the {@link TwoPhaseIterator} pattern used by
+         * {@link OptionalColumnAtATimeReader#tryContainsIterator} is intentionally not adopted
+         * here because the wrapper produced by {@link TwoPhaseIterator#asDocIdSetIterator}
+         * doesn't carry those bulk overrides through.
+         */
         default DocIdSetIterator tryRangeIterator(long lowerValue, long upperValue) throws IOException {
             return null;
         }
@@ -301,8 +339,11 @@ public interface BlockLoader {
         NumericDocValues toLengthValues();
 
         /**
-         * Creates a {@link DocIdSetIterator} that matches documents based on the specified length value.
-         * The returned iterator will iterate over all documents whose length value equals the given length.
+         * Creates a {@link DocIdSetIterator} that matches documents whose length equals {@code length}.
+         *
+         * <p>Implementations should return a {@link TwoPhaseIterator}-backed iterator (wrapped via
+         * {@link TwoPhaseIterator#asDocIdSetIterator}) — see the rationale on
+         * {@link OptionalColumnAtATimeReader#tryContainsIterator}.
          *
          * @param length the length value to match against the documents.
          * @return a {@link DocIdSetIterator} to iterate over documents matching the specified length value.

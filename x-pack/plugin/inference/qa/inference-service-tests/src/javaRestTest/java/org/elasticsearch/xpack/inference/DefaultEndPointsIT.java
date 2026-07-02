@@ -66,9 +66,8 @@ public class DefaultEndPointsIT extends InferenceBaseRestTest {
     }
 
     @After
-    public void tearDown() throws Exception {
+    public void closeThreadPool() throws Exception {
         threadPool.close();
-        super.tearDown();
     }
 
     public void testGet() throws IOException {
@@ -185,6 +184,22 @@ public class DefaultEndPointsIT extends InferenceBaseRestTest {
         Request request = new Request("PUT", "_cluster/settings");
         request.setJsonEntity("{\"persistent\": {\"xpack.ml.model_platform_architectures\": null}}");
         client().performRequest(request);
+    }
+
+    public void testUpdateDefaultEndpointReturnsBadRequest() throws IOException {
+        var e = expectThrows(ResponseException.class, () -> updateEndpoint(ElasticsearchInternalService.DEFAULT_E5_ID, """
+            {
+              "task_type": "text_embedding",
+              "service_settings": {
+                "num_threads": 2
+              }
+            }
+            """, TaskType.TEXT_EMBEDDING));
+        assertThat(e.getResponse().getStatusLine().getStatusCode(), is(RestStatus.BAD_REQUEST.getStatus()));
+        assertThat(
+            e.getMessage(),
+            containsString(Strings.format("Default endpoint [%s] cannot be updated", ElasticsearchInternalService.DEFAULT_E5_ID))
+        );
     }
 
     public void testDefaultModels() throws IOException {

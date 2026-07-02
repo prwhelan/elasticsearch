@@ -229,6 +229,7 @@ module org.elasticsearch.server {
     exports org.elasticsearch.common.xcontent;
     exports org.elasticsearch.common.xcontent.support;
     exports org.elasticsearch.discovery;
+    exports org.elasticsearch.eirf;
     exports org.elasticsearch.env;
     exports org.elasticsearch.features;
     exports org.elasticsearch.gateway;
@@ -386,6 +387,7 @@ module org.elasticsearch.server {
     exports org.elasticsearch.search.vectors;
     exports org.elasticsearch.shutdown;
     exports org.elasticsearch.snapshots;
+    exports org.elasticsearch.sourcebatch;
     exports org.elasticsearch.synonyms;
     exports org.elasticsearch.tasks;
     exports org.elasticsearch.threadpool;
@@ -498,6 +500,10 @@ module org.elasticsearch.server {
             org.elasticsearch.index.codec.Elasticsearch93Lucene104Codec,
             org.elasticsearch.index.codec.tsdb.ES93TSDBDefaultCompressionLucene103Codec,
             org.elasticsearch.index.codec.tsdb.ES94TSDBBestCompressionLucene104Codec;
+
+    provides org.apache.lucene.index.SortFieldProvider
+        with
+            org.elasticsearch.index.fielddata.plain.MultiValuedBinaryDocValuesSortField.Provider;
 
     provides org.apache.logging.log4j.core.util.ContextDataProvider with org.elasticsearch.common.logging.DynamicContextDataProvider;
 

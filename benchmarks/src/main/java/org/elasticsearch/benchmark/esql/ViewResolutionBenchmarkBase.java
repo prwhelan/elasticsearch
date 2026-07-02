@@ -37,6 +37,7 @@ import org.elasticsearch.search.crossproject.CrossProjectModeDecider;
 import org.elasticsearch.telemetry.metric.MeterRegistry;
 import org.elasticsearch.threadpool.DefaultBuiltInExecutorBuilders;
 import org.elasticsearch.threadpool.ThreadPool;
+import org.elasticsearch.xpack.esql.EsqlTestUtils;
 import org.elasticsearch.xpack.esql.action.EsqlResolveViewAction;
 import org.elasticsearch.xpack.esql.analysis.Analyzer;
 import org.elasticsearch.xpack.esql.analysis.AnalyzerContext;
@@ -196,7 +197,8 @@ public abstract class ViewResolutionBenchmarkBase {
             new AnalyzerContext(
                 config,
                 functionRegistry,
-                new PromqlFunctionRegistry(),
+                PromqlFunctionRegistry.INSTANCE,
+                EsqlTestUtils.TEST_ANALYSIS_REGISTRY,
                 Map.of(new IndexPattern(Source.EMPTY, esIndex.name()), IndexResolution.valid(esIndex)),
                 Map.of(),
                 new EnrichResolution(),

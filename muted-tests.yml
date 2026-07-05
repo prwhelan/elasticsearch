@@ -257,6 +257,9 @@ tests:
 - class: org.elasticsearch.repositories.azure.AzureBlobContainerRetriesTests
   method: testReadBlobWithNoHttpResponse
   issue: https://github.com/elastic/elasticsearch/issues/152911
+- class: org.elasticsearch.compute.aggregation.SumLongAggregatorFunctionTests
+  method: testOverflowFails
+  issue: https://github.com/elastic/elasticsearch/issues/150455
 
 # Examples:
 #

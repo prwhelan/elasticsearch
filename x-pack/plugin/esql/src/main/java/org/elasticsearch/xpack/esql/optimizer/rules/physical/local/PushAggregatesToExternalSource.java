@@ -262,12 +262,17 @@ public class PushAggregatesToExternalSource extends PhysicalOptimizerRules.Param
         return switch (dataType) {
             case INTEGER -> blockFactory.newConstantIntBlockWith(((Number) value).intValue(), 1);
             case LONG, COUNTER_LONG, DATETIME -> blockFactory.newConstantLongBlockWith(((Number) value).longValue(), 1);
+            // UNSIGNED_LONG is stored sign-flip-encoded (value ^ 2^63) inside a signed LongBlock, same as every
+            // other value-output surface; the source plugin's stat producer is responsible for handing back an
+            // already-encoded value (see e.g. Parquet's ParquetFormatReader#normalizeStatValue), not this generic
+            // block builder, since only the source knows the raw on-disk representation it must decode from.
+            case UNSIGNED_LONG -> blockFactory.newConstantLongBlockWith(((Number) value).longValue(), 1);
             case DOUBLE, COUNTER_DOUBLE -> blockFactory.newConstantDoubleBlockWith(((Number) value).doubleValue(), 1);
             case BOOLEAN -> blockFactory.newConstantBooleanBlockWith(
                 value instanceof Boolean b ? b : Booleans.parseBoolean(value.toString()),
                 1
             );
-            case KEYWORD, TEXT -> blockFactory.newConstantBytesRefBlockWith(new BytesRef(value.toString()), 1);
+            case KEYWORD, TEXT -> blockFactory.newConstantBytesRefBlockWith(toBytesRef(value), 1);
             default -> {
                 if (value instanceof Number n) {
                     yield blockFactory.newConstantLongBlockWith(n.longValue(), 1);
@@ -275,6 +280,24 @@ public class PushAggregatesToExternalSource extends PhysicalOptimizerRules.Param
                 yield blockFactory.newConstantNullBlock(1);
             }
         };
+    }
+
+    /**
+     * Coerces a stat value to a {@link BytesRef} suitable for a constant KEYWORD / TEXT block. The
+     * {@link Object#toString} fallback is reserved for stat values whose {@code toString} is
+     * documented to return the underlying UTF-8 string (e.g. Parquet's {@code Binary}). Direct
+     * {@link BytesRef} and raw {@code byte[]} stat values bypass {@code toString} entirely because
+     * {@link BytesRef#toString} returns a hex dump (e.g. {@code [61 6c 70 68 61]}) and a
+     * round-trip through it would corrupt the warm-path result.
+     */
+    private static BytesRef toBytesRef(Object value) {
+        if (value instanceof BytesRef br) {
+            return br;
+        }
+        if (value instanceof byte[] bytes) {
+            return new BytesRef(bytes);
+        }
+        return new BytesRef(value.toString());
     }
 
     private List<Expression> extractAggregateFunctions(List<? extends NamedExpression> aggregates) {

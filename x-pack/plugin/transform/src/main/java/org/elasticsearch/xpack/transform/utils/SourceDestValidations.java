@@ -40,9 +40,9 @@ public final class SourceDestValidations {
         DESTINATION_PIPELINE_MISSING_VALIDATION
     );
 
-   // SOURCE_MISSING and REMOTE_SOURCE license check are deferred to the runtime search call.
-   // DESTINATION_IN_SOURCE is skipped because project_routing determines at search time
-   // whether dest is included in the cross-project source expression.
+    // SOURCE_MISSING and REMOTE_SOURCE license check are deferred to the runtime search call.
+    // DESTINATION_IN_SOURCE is skipped because project_routing determines at search time
+    // whether dest is included in the cross-project source expression.
     private static final List<SourceDestValidation> ALL_VALIDATIONS_FOR_CPS = List.of(
         DESTINATION_SINGLE_INDEX_VALIDATION,
         DESTINATION_PIPELINE_MISSING_VALIDATION

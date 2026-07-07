@@ -269,6 +269,9 @@ tests:
 - class: org.elasticsearch.tdigest.ComparisonTests
   method: testSparseGaussianDistribution
   issue: https://github.com/elastic/elasticsearch/issues/153061
+- class: org.elasticsearch.test.apmintegration.TracesApmIT
+  method: testTraces
+  issue: https://github.com/elastic/elasticsearch/issues/153062
 
 # Examples:
 #

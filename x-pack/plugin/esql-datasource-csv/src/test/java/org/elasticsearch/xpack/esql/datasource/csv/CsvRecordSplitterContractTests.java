@@ -79,7 +79,12 @@ public class CsvRecordSplitterContractTests extends ESTestCase {
     }
 
     private static Case[] cases(int maxRecordBytes) {
-        return new Case[] { quotedFieldsOnly(maxRecordBytes), bracketMvc(maxRecordBytes) };
+        return new Case[] { quotedFieldsOnly(maxRecordBytes), bracketMvc(maxRecordBytes), newlineNoQuote(maxRecordBytes) };
+    }
+
+    private static Case newlineNoQuote(int maxRecordBytes) {
+        // The no-quote modes' splitter honors the same boundary contract as its quote-aware siblings.
+        return new Case("newline-no-quote", () -> new NewlineRecordSplitter(maxRecordBytes));
     }
 
     private static Case quotedFieldsOnly(int maxRecordBytes) {
@@ -87,7 +92,25 @@ public class CsvRecordSplitterContractTests extends ESTestCase {
     }
 
     private static Case bracketMvc(int maxRecordBytes) {
-        return new Case("bracket-mvc", () -> new CsvRecordSplitter(CsvFormatOptions.DEFAULT, maxRecordBytes));
+        // CsvFormatOptions.DEFAULT now defaults to MultiValueSyntax.NONE; construct an explicit
+        // BRACKETS-mode options so the bracket-MVC contract assertions actually exercise that path.
+        return new Case("bracket-mvc", () -> new CsvRecordSplitter(bracketsDefault(), maxRecordBytes));
+    }
+
+    private static CsvFormatOptions bracketsDefault() {
+        return new CsvFormatOptions(
+            ',',
+            '"',
+            '\\',
+            "//",
+            "",
+            StandardCharsets.UTF_8,
+            null,
+            CsvFormatOptions.DEFAULT_MAX_FIELD_SIZE,
+            CsvFormatOptions.MultiValueSyntax.BRACKETS,
+            true,
+            CsvFormatOptions.DEFAULT_COLUMN_PREFIX
+        );
     }
 
     private static int driveForwardToLastBoundary(RecordSplitter splitter, byte[] input) throws IOException {

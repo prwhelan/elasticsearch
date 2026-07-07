@@ -29,6 +29,7 @@ import org.elasticsearch.inference.configuration.SettingsConfigurationFieldType;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.xpack.core.inference.action.InferenceAction;
 import org.elasticsearch.xpack.core.inference.chunking.EmbeddingRequestChunker;
+import org.elasticsearch.xpack.inference.common.InferencePreferencesCache;
 import org.elasticsearch.xpack.inference.external.http.sender.ChatCompletionInput;
 import org.elasticsearch.xpack.inference.external.http.sender.EmbeddingsInput;
 import org.elasticsearch.xpack.inference.external.http.sender.HttpRequestSender;
@@ -100,14 +101,10 @@ public class ElasticInferenceService extends SenderService<ElasticInferenceServi
     /**
      * The task types that the {@link InferenceAction.Request} can accept.
      */
-    private static final EnumSet<TaskType> SUPPORTED_INFERENCE_ACTION_TASK_TYPES = EnumSet.of(
-        SPARSE_EMBEDDING,
-        COMPLETION,
-        RERANK,
-        TEXT_EMBEDDING
-    );
+    private static final EnumSet<TaskType> SUPPORTED_INFERENCE_ACTION_TASK_TYPES = EnumSet.of(SPARSE_EMBEDDING, COMPLETION, TEXT_EMBEDDING);
 
     private final CCMAuthenticationApplierFactory ccmAuthenticationApplierFactory;
+    private final InferencePreferencesCache inferencePreferencesCache;
     private ElasticInferenceServiceActionCreator actionCreator;
 
     public ElasticInferenceService(
@@ -115,9 +112,17 @@ public class ElasticInferenceService extends SenderService<ElasticInferenceServi
         ServiceComponents serviceComponents,
         ElasticInferenceServiceSettings elasticInferenceServiceSettings,
         InferenceServiceExtension.InferenceServiceFactoryContext context,
-        CCMAuthenticationApplierFactory ccmAuthApplierFactory
+        CCMAuthenticationApplierFactory ccmAuthApplierFactory,
+        InferencePreferencesCache inferencePreferencesCache
     ) {
-        this(factory, serviceComponents, elasticInferenceServiceSettings, context.clusterService(), ccmAuthApplierFactory);
+        this(
+            factory,
+            serviceComponents,
+            elasticInferenceServiceSettings,
+            context.clusterService(),
+            ccmAuthApplierFactory,
+            inferencePreferencesCache
+        );
     }
 
     public ElasticInferenceService(
@@ -125,10 +130,12 @@ public class ElasticInferenceService extends SenderService<ElasticInferenceServi
         ServiceComponents serviceComponents,
         ElasticInferenceServiceSettings elasticInferenceServiceSettings,
         ClusterService clusterService,
-        CCMAuthenticationApplierFactory ccmAuthApplierFactory
+        CCMAuthenticationApplierFactory ccmAuthApplierFactory,
+        InferencePreferencesCache inferencePreferencesCache
     ) {
         super(factory, serviceComponents, clusterService, initModelCreators(elasticInferenceServiceSettings));
         this.ccmAuthenticationApplierFactory = ccmAuthApplierFactory;
+        this.inferencePreferencesCache = inferencePreferencesCache;
     }
 
     private static Map<TaskType, ModelCreator<? extends ElasticInferenceServiceModel>> initModelCreators(
@@ -157,7 +164,12 @@ public class ElasticInferenceService extends SenderService<ElasticInferenceServi
 
     public void init() {
         // Wait to initialize the action creator until the sender is constructed
-        this.actionCreator = new ElasticInferenceServiceActionCreator(getSender(), getServiceComponents(), ccmAuthenticationApplierFactory);
+        this.actionCreator = new ElasticInferenceServiceActionCreator(
+            getSender(),
+            getServiceComponents(),
+            ccmAuthenticationApplierFactory,
+            inferencePreferencesCache
+        );
     }
 
     @Override
@@ -281,6 +293,11 @@ public class ElasticInferenceService extends SenderService<ElasticInferenceServi
     }
 
     @Override
+    protected boolean supportsMultimodalRerank() {
+        return true;
+    }
+
+    @Override
     protected void doRerankInfer(Model model, RerankRequest request, TimeValue timeout, ActionListener<InferenceServiceResults> listener) {
         if (!(model instanceof ElasticInferenceServiceRerankModel elasticInferenceServiceRerankModel)) {
             listener.onFailure(createInvalidModelException(model));
@@ -292,11 +309,6 @@ public class ElasticInferenceService extends SenderService<ElasticInferenceServi
             getCurrentTraceInfo(),
             listener.delegateFailureAndWrap((delegate, action) -> action.execute(fromRerankRequest(request), timeout, delegate))
         );
-    }
-
-    @Override
-    public boolean supportsNewRerankCodePath() {
-        return true;
     }
 
     @Override

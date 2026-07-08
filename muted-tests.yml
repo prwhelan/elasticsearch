@@ -269,6 +269,9 @@ tests:
 - class: org.elasticsearch.repositories.s3.S3BlobStoreRepositoryTimeoutTests
   method: testSnapshotWithLargeSegmentFiles
   issue: https://github.com/elastic/elasticsearch/issues/153106
+- class: org.elasticsearch.xpack.transform.integration.TransformCrossProjectIT
+  method: testUpdateTransformWithProjectRouting
+  issue: https://github.com/elastic/elasticsearch/issues/147534
 
 # Examples:
 #

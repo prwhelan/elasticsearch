@@ -93,6 +93,19 @@ public class TransformPersistentTasksExecutor extends PersistentTasksExecutor<Tr
 
     // The amount of time we wait for the cluster state to respond when being marked as failed
     private static final int MARK_AS_FAILED_TIMEOUT_SEC = 90;
+
+    /**
+     * {@code isTransient} for the checkpoint loads in {@link #nodeOperation}: treat every failure as retryable. Unlike the
+     * stored-doc load -- which excludes {@link ResourceNotFoundException} because a missing doc is the "new transform" signal,
+     * not a failure -- a checkpoint load has no such not-a-failure case. We deliberately do NOT try to fail fast on a
+     * "permanent-looking" exception at this reassignment-time site: the transient errors this retry exists to absorb (a
+     * {@code .transform-internal} shard still recovering onto another node) can surface with the same status codes
+     * (e.g. 404/503) that {@code ExceptionRootCauseFinder#isExceptionIrrecoverable} would treat as permanent, so classifying
+     * here would risk failing the transform on exactly the transient condition we are trying to survive. Attended transforms
+     * are still bounded -- they fail once their {@code num_failure_retries} budget is exhausted; unattended transforms retry
+     * indefinitely by contract, now observably (see {@link #auditReassignmentLoadRetry}).
+     */
+    private static final Predicate<Exception> RETRY_ANY_CHECKPOINT_LOAD_FAILURE = e -> true;
     private final Client client;
     private final TransformServices transformServices;
     private final ThreadPool threadPool;
@@ -301,7 +314,7 @@ public class TransformPersistentTasksExecutor extends PersistentTasksExecutor<Tr
                 buildTask,
                 params,
                 numFailureRetriesHolder.get(),
-                e -> true,
+                RETRY_ANY_CHECKPOINT_LOAD_FAILURE,
                 al -> transformServices.configManager().getTransformCheckpoint(transformId, lastCheckpoint.getCheckpoint() + 1, al),
                 getTransformNextCheckpointListener
             );
@@ -345,7 +358,7 @@ public class TransformPersistentTasksExecutor extends PersistentTasksExecutor<Tr
                         buildTask,
                         params,
                         numFailureRetriesHolder.get(),
-                        e -> true,
+                        RETRY_ANY_CHECKPOINT_LOAD_FAILURE,
                         al -> transformServices.configManager().getTransformCheckpoint(transformId, lastCheckpoint + 1, al),
                         getTransformNextCheckpointListener
                     );
@@ -355,7 +368,7 @@ public class TransformPersistentTasksExecutor extends PersistentTasksExecutor<Tr
                         buildTask,
                         params,
                         numFailureRetriesHolder.get(),
-                        e -> true,
+                        RETRY_ANY_CHECKPOINT_LOAD_FAILURE,
                         al -> transformServices.configManager().getTransformCheckpoint(transformId, lastCheckpoint, al),
                         getTransformLastCheckpointListener
                     );
@@ -531,10 +544,16 @@ public class TransformPersistentTasksExecutor extends PersistentTasksExecutor<Tr
             if (isTransient.test(e) == false) {
                 return false;
             }
+            int count = attempts.incrementAndGet();
             if (numFailureRetries == -1) {
+                // Unattended transforms retry indefinitely (they must never fail; mirrors TransformFailureHandler). We still
+                // surface the retry periodically -- throttled, because this path re-fires every scheduler frequency -- so a
+                // transform wedged on a persistently-failing load stays observable instead of looping silently forever.
+                if (count == 1 || count % TransformFailureHandler.LOG_FAILURE_EVERY == 0) {
+                    auditReassignmentLoadRetry(transformId, e, count, numFailureRetries);
+                }
                 return true;
             }
-            int count = attempts.incrementAndGet();
             boolean retry = count <= numFailureRetries;
             if (retry) {
                 auditReassignmentLoadRetry(transformId, e, count, numFailureRetries);
@@ -562,19 +581,22 @@ public class TransformPersistentTasksExecutor extends PersistentTasksExecutor<Tr
     }
 
     /**
-     * Audits a bounded (attended) reassignment-load retry, mirroring {@code TransformFailureHandler.logRetry}'s WARNING-level
-     * convention and message shape for the indexer run-time retry path. Unattended retries at this site remain silent, same
-     * as before this method existed — {@link #retryTransientLoad} never calls this for {@code numFailureRetries == -1}.
+     * Audits and logs a reassignment-load retry, mirroring {@code TransformFailureHandler.logRetry}'s convention and message
+     * shape for the indexer run-time retry path: WARNING for attended transforms (once per tolerated attempt), INFO for
+     * unattended transforms. Unattended transforms retry indefinitely, so {@link #retryTransientLoad} throttles how often it
+     * calls this. The {@code [count/limit]} suffix shows {@code -1} as the limit for unattended, exactly as
+     * {@code TransformFailureHandler.logRetry} does.
      */
     private void auditReassignmentLoadRetry(String transformId, Exception e, int count, int numFailureRetries) {
+        boolean unattended = numFailureRetries == -1;
         String message = Strings.format(
             "Transform encountered an exception while reloading state after reassignment: [%s]; Will automatically retry [%d/%d]",
             e.getMessage(),
             count,
             numFailureRetries
         );
-        logger.atWarn().withThrowable(e).log("[{}] {}", transformId, message);
-        auditor.audit(WARNING, transformId, message);
+        logger.atLevel(unattended ? Level.INFO : Level.WARN).withThrowable(e).log("[{}] {}", transformId, message);
+        auditor.audit(unattended ? INFO : WARNING, transformId, message);
     }
 
     private ActionListener<Void> getTransformConfig(

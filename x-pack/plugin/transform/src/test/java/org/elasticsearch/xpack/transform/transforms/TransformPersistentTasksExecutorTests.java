@@ -85,8 +85,10 @@ import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
+import static org.elasticsearch.xpack.core.common.notifications.Level.INFO;
 import static org.elasticsearch.xpack.core.common.notifications.Level.WARNING;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.startsWith;
@@ -547,7 +549,8 @@ public class TransformPersistentTasksExecutorTests extends ESTestCase {
         };
 
         var transformScheduler = new TransformScheduler(Clock.systemUTC(), threadPool, fastRetry(), TimeValue.ZERO);
-        var taskExecutor = buildTaskExecutor(transformServices(transformsConfigManager, transformScheduler));
+        var transformServices = transformServices(transformsConfigManager, transformScheduler);
+        var taskExecutor = buildTaskExecutor(transformServices);
 
         var params = taskParams(transformId);
         putUnattendedTransformConfiguration(transformsConfigManager, transformId);
@@ -561,6 +564,57 @@ public class TransformPersistentTasksExecutorTests extends ESTestCase {
         transformScheduler.scheduleNow(transformId);
 
         verify(task).start(isNull(), any());
+        // unattended retries are still observable: one INFO-level audit for the single tolerated attempt
+        verify(transformServices.auditor(), times(1)).audit(eq(INFO), eq(transformId), any());
+        verify(transformServices.auditor(), never()).audit(eq(WARNING), any(), any());
+    }
+
+    /**
+     * Unattended transforms retry a transient reassignment-load failure indefinitely (see
+     * {@link #testNodeOperationRetriesTransientStateLoadForUnattendedTransform}), but that must not mean the retries are
+     * silent: an unattended transform stuck retrying this load forever needs an audit trail an operator can find. It also
+     * must not spam the audit log once per {@code frequency} tick forever, so the audit is throttled the same way
+     * {@code TransformFailureHandler.logRetry} throttles repeated indexer run-time failures
+     * ({@code TransformFailureHandler.LOG_FAILURE_EVERY}).
+     */
+    public void testNodeOperationThrottlesAuditForRepeatedUnattendedStateLoadRetry() throws Exception {
+        var transformId = "testUnattendedStateLoadRetryThrottled";
+        // Fail the first 11 attempts (counts 1..11), then let the 12th succeed.
+        var failuresRemaining = new AtomicInteger(11);
+        var transformsConfigManager = new InMemoryTransformConfigManager() {
+            @Override
+            public void getTransformStoredDoc(
+                String tid,
+                boolean allowNoMatch,
+                ActionListener<Tuple<TransformStoredDoc, SeqNoPrimaryTermAndIndex>> listener
+            ) {
+                if (failuresRemaining.getAndUpdate(n -> Math.max(0, n - 1)) > 0) {
+                    listener.onFailure(new IllegalStateException("shard temporarily unavailable"));
+                } else {
+                    super.getTransformStoredDoc(tid, allowNoMatch, listener);
+                }
+            }
+        };
+
+        var transformScheduler = new TransformScheduler(Clock.systemUTC(), threadPool, fastRetry(), TimeValue.ZERO);
+        var transformServices = transformServices(transformsConfigManager, transformScheduler);
+        var taskExecutor = buildTaskExecutor(transformServices);
+
+        var params = taskParams(transformId);
+        putUnattendedTransformConfiguration(transformsConfigManager, transformId);
+
+        var task = mockTransformTask();
+        taskExecutor.nodeOperation(task, params, mock()); // attempt 1 -- fails, audited (first attempt)
+        for (int attempt = 2; attempt <= 11; attempt++) {
+            // attempts 2-9, 11 are throttled; attempt 10 is audited (LOG_FAILURE_EVERY)
+            transformScheduler.scheduleNow(transformId);
+        }
+        transformScheduler.scheduleNow(transformId); // attempt 12 -- succeeds
+
+        verify(task).start(isNull(), any());
+        // audited only for attempts 1 and 10 -- the other 9 tolerated failures were throttled
+        verify(transformServices.auditor(), times(2)).audit(eq(INFO), eq(transformId), any());
+        verify(transformServices.auditor(), never()).audit(eq(WARNING), any(), any());
     }
 
     /**

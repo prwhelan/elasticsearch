@@ -184,6 +184,7 @@ public class TransportUpgradeTransformsAction extends TransportMasterNodeAction<
                 destIndexSettings,
                 cloudCredentialManager,
                 false, // mintCloudCredential — validate with stored credential only
+                cloudCredentialManager.currentCallerCredential(),
                 listener
             );
         }, failure -> {

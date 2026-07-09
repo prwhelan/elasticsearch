@@ -37,6 +37,7 @@ import org.elasticsearch.tasks.TaskId;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
 import org.elasticsearch.xpack.core.ClientHelper;
+import org.elasticsearch.xpack.core.security.cloud.CloudCredential;
 import org.elasticsearch.xpack.core.transform.TransformMessages;
 import org.elasticsearch.xpack.core.transform.TransformMetadata;
 import org.elasticsearch.xpack.core.transform.action.StartTransformAction;
@@ -289,12 +290,7 @@ public class TransportStartTransformAction extends TransportMasterNodeAction<Sta
             // dispatch listener fires. Plugs the leak when the request is forwarded to a remote node
             // or when dispatch fails synchronously before the receiver-side releaseAfter is set up.
             // Request.close() is null-safe so this path is identical for non-UIAM callers.
-            var validateRequest = new ValidateTransformAction.Request(
-                config,
-                false,
-                request.ackTimeout(),
-                cloudCredentialManager.currentCallerCredential()
-            );
+            var validateRequest = new ValidateTransformAction.Request(config, false, request.ackTimeout(), request.getCloudCredential());
             ClientHelper.executeAsyncWithOrigin(
                 parentClient,
                 ClientHelper.TRANSFORM_ORIGIN,
@@ -324,6 +320,17 @@ public class TransportStartTransformAction extends TransportMasterNodeAction<Sta
     @Override
     protected ClusterBlockException checkBlock(StartTransformAction.Request request, ClusterState state) {
         return state.blocks().globalBlockedException(projectResolver.getProjectId(), ClusterBlockLevel.METADATA_WRITE);
+    }
+
+    @Override
+    protected void doExecute(Task task, StartTransformAction.Request request, ActionListener<StartTransformAction.Response> listener) {
+        // Extract on the coordinating node, before the request is forwarded to master — the
+        // AUTHENTICATING_CLOUD_TOKEN_THREAD_CONTEXT transient does not survive master forwarding.
+        CloudCredential callerCredential = cloudCredentialManager.currentCallerCredential();
+        if (callerCredential != null) {
+            request.setCloudCredential(callerCredential);
+        }
+        super.doExecute(task, request, ActionListener.releaseAfter(listener, request));
     }
 
     private void cancelTransformTask(String taskId, String transformId, Exception exception, Consumer<Exception> onFailure) {

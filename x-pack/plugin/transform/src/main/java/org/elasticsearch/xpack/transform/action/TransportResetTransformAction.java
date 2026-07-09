@@ -161,6 +161,7 @@ public class TransportResetTransformAction extends AcknowledgedTransportMasterNo
                     destIndexSettings,
                     cloudCredentialManager,
                     false, // mintCloudCredential — validate with stored credential only
+                    cloudCredentialManager.currentCallerCredential(),
                     updateTransformListener
                 );
             },

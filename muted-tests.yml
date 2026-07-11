@@ -251,6 +251,9 @@ tests:
 - class: org.elasticsearch.compute.operator.exchange.ExchangeServiceTests
   method: testBasic
   issue: https://github.com/elastic/elasticsearch/issues/153347
+- class: org.elasticsearch.repositories.gcs.GoogleCloudStorageBlobContainerRetriesTests
+  method: testWriteLargeBlob
+  issue: https://github.com/elastic/elasticsearch/issues/150356
 
 # Examples:
 #

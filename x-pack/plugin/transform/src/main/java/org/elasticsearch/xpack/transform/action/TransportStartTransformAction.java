@@ -290,7 +290,17 @@ public class TransportStartTransformAction extends TransportMasterNodeAction<Sta
             // dispatch listener fires. Plugs the leak when the request is forwarded to a remote node
             // or when dispatch fails synchronously before the receiver-side releaseAfter is set up.
             // Request.close() is null-safe so this path is identical for non-UIAM callers.
-            var validateRequest = new ValidateTransformAction.Request(config, false, request.ackTimeout(), request.getCloudCredential());
+            //
+            // Uses an independent copy of the credential: TransportValidateTransformAction
+            // unconditionally closes whatever credential this request carries once validate resolves
+            // (it has to, to cover the redirect-to-another-node case), which would zero out the
+            // outer request's credential before the outer releaseAfter(listener, request) gets to it.
+            var validateRequest = new ValidateTransformAction.Request(
+                config,
+                false,
+                request.ackTimeout(),
+                CloudCredential.copyOf(request.getCloudCredential())
+            );
             ClientHelper.executeAsyncWithOrigin(
                 parentClient,
                 ClientHelper.TRANSFORM_ORIGIN,

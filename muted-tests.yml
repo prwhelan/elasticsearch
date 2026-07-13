@@ -260,6 +260,9 @@ tests:
 - class: org.elasticsearch.repositories.SnapshotMetricsIT
   method: testSnapshotAPMMetrics
   issue: https://github.com/elastic/elasticsearch/issues/153595
+- class: org.elasticsearch.xpack.search.AsyncSearchActionIT
+  method: testDeleteCleanupIndex
+  issue: https://github.com/elastic/elasticsearch/issues/153658
 
 # Examples:
 #

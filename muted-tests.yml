@@ -266,6 +266,9 @@ tests:
 - class: org.elasticsearch.xpack.search.AsyncSearchActionIT
   method: testRestartAfterCompletion
   issue: https://github.com/elastic/elasticsearch/issues/153659
+- class: org.elasticsearch.xpack.search.AsyncSearchActionIT
+  method: testInvalidId
+  issue: https://github.com/elastic/elasticsearch/issues/153660
 
 # Examples:
 #

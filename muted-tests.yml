@@ -251,6 +251,9 @@ tests:
 - class: org.elasticsearch.repositories.SnapshotMetricsIT
   method: testSnapshotAPMMetrics
   issue: https://github.com/elastic/elasticsearch/issues/153595
+- class: org.elasticsearch.smoketest.SmokeTestMultiNodeClientYamlTestSuiteIT
+  method: test {yaml=field_caps/10_basic/Get prefix field caps}
+  issue: https://github.com/elastic/elasticsearch/issues/153913
 
 # Examples:
 #

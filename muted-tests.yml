@@ -263,6 +263,9 @@ tests:
 - class: org.elasticsearch.upgrades.RecoveryIT
   method: testRecoveryClosedIndex
   issue: https://github.com/elastic/elasticsearch/issues/154166
+- class: org.elasticsearch.upgrades.RecoveryIT
+  method: testSoftDeletesDisabledWarning
+  issue: https://github.com/elastic/elasticsearch/issues/154167
 
 # Examples:
 #

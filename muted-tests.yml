@@ -260,6 +260,9 @@ tests:
 - class: org.elasticsearch.xpack.esql.evaluator.command.TestCompoundOutputEvaluatorTests
   method: testSimpleCircuitBreaking
   issue: https://github.com/elastic/elasticsearch/issues/154059
+- class: org.elasticsearch.gateway.PersistedClusterStateServiceTests
+  method: testLimitsFileCount
+  issue: https://github.com/elastic/elasticsearch/issues/149557
 
 # Examples:
 #

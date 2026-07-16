@@ -260,6 +260,9 @@ tests:
 - class: org.elasticsearch.upgrades.RecoveryIT
   method: testOperationBasedRecovery
   issue: https://github.com/elastic/elasticsearch/issues/154165
+- class: org.elasticsearch.upgrades.RecoveryIT
+  method: testRecoveryClosedIndex
+  issue: https://github.com/elastic/elasticsearch/issues/154166
 
 # Examples:
 #

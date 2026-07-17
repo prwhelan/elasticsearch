@@ -82,8 +82,16 @@ public class StartTransformAction extends ActionType<StartTransformAction.Respon
             return cloudCredential;
         }
 
-        public void setCloudCredential(@Nullable CloudCredential cloudCredential) {
+        /**
+         * Sets the credential this request carries and hands ownership of the previously-held
+         * credential back to the caller, which is responsible for closing it. Returns {@code null}
+         * when the credential is unchanged.
+         */
+        @Nullable
+        public CloudCredential setCloudCredential(@Nullable CloudCredential cloudCredential) {
+            var previous = this.cloudCredential == cloudCredential ? null : this.cloudCredential;
             this.cloudCredential = cloudCredential;
+            return previous;
         }
 
         @Override

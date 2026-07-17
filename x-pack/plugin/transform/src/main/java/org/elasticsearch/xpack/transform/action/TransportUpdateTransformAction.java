@@ -25,6 +25,7 @@ import org.elasticsearch.cluster.project.ProjectResolver;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
+import org.elasticsearch.core.IOUtils;
 import org.elasticsearch.discovery.MasterNotDiscoveredException;
 import org.elasticsearch.injection.guice.Inject;
 import org.elasticsearch.persistent.PersistentTasksCustomMetadata;
@@ -257,10 +258,7 @@ public class TransportUpdateTransformAction extends TransportTasksAction<Transfo
                                 // Mint/validate (if any) already consumed their own copies of the
                                 // credential; avoid re-shipping it to the task's executor node, which
                                 // has no releaseAfter to close it.
-                                if (request.getCloudCredential() != null) {
-                                    request.getCloudCredential().close();
-                                    request.setCloudCredential(null);
-                                }
+                                IOUtils.closeWhileHandlingException(request.setCloudCredential(null));
                                 super.doExecute(task, request, taskUpdateListener);
                                 return;
                             } else if (updateChangesHeaders) {

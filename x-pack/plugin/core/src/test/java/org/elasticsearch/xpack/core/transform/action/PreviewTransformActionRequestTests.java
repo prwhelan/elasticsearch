@@ -273,6 +273,36 @@ public class PreviewTransformActionRequestTests extends AbstractSerializingTrans
         request.close();
     }
 
+    public void testSetCloudCredentialReturnsPreviousCredential() {
+        // Overwriting hands ownership of the previous credential back to the caller: it is
+        // returned still open (not zeroed) so the caller decides when to close it.
+        var first = randomCloudCredential();
+        var second = randomCloudCredential();
+        var request = new Request(randomTransformConfig(), randomTimeValue(), false);
+        assertThat(request.setCloudCredential(first), is(nullValue()));
+
+        var previous = request.setCloudCredential(second);
+        assertThat(previous, is(first));
+        assertThat(previous.value().length() > 0, is(true));
+        assertThat(request.getCloudCredential(), is(second));
+
+        previous.close();
+        request.close();
+    }
+
+    public void testSetCloudCredentialSelfAssignmentReturnsNull() {
+        // Re-setting the credential the request already holds returns null so a caller closing
+        // the returned value can never zero the credential the request still carries.
+        var credential = randomCloudCredential();
+        var request = new Request(randomTransformConfig(), randomTimeValue(), false);
+        request.setCloudCredential(credential);
+
+        assertThat(request.setCloudCredential(credential), is(nullValue()));
+        assertThat(credential.value().length() > 0, is(true));
+
+        request.close();
+    }
+
     public void testRequestCloseIsIdempotentWithoutCredential() {
         // Non-UIAM callers leave the credential null. The same close-twice path must be a no-op.
         var request = new Request(randomTransformConfig(), randomTimeValue(), false);

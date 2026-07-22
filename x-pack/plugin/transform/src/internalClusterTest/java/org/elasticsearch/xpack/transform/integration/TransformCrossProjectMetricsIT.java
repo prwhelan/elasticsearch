@@ -53,7 +53,7 @@ public class TransformCrossProjectMetricsIT extends TransformSingleNodeTestCase 
             .put(super.nodeSettings())
             .put(XPackSettings.SECURITY_ENABLED.getKey(), false)
             .put("serverless.cross_project.enabled", true)
-            .put(TransformCrossProjectMetrics.POLL_INTERVAL_SETTING.getKey(), TimeValue.timeValueSeconds(1))
+            .put(TransformCrossProjectMetrics.POLL_INTERVAL_SETTING.getKey(), TimeValue.timeValueSeconds(10))
             .build();
     }
 
@@ -78,7 +78,7 @@ public class TransformCrossProjectMetricsIT extends TransformSingleNodeTestCase 
         startTransform(transformId);
 
         try {
-            // once the first search completes and the 1s poll fires, the node publishes:
+            // once the first search completes and the 10s poll fires, the node publishes:
             // no UIAM service locally -> legacy; no linked projects -> origin
             assertBusy(() -> {
                 telemetry.resetMeter();

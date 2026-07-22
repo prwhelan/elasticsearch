@@ -698,6 +698,14 @@ class ClientTransformIndexer extends TransformIndexer {
         }
         logger.trace("searchRequest: [{}]", searchRequest);
 
+        // record per-search metrics on every success path, including the pit-fallback retries below
+        ActionListener<SearchResponse> recordingListener = listener.delegateFailureAndWrap((l, response) -> {
+            if (response != null) {
+                context.recordSearchMetrics(getConfig().getCredentialId() != null, response.getClusters().hasRemoteClusters());
+            }
+            l.onResponse(response);
+        });
+
         ClientHelper.executeWithHeadersAsync(
             transformConfig.getHeaders(),
             ClientHelper.TRANSFORM_ORIGIN,
@@ -711,7 +719,7 @@ class ClientTransformIndexer extends TransformIndexer {
                     logger.trace("point in time handle has changed; request [{}]", name);
                 }
 
-                listener.onResponse(response);
+                recordingListener.onResponse(response);
             }, e -> {
                 // check if the error has been caused by a missing search context, which could be a timed out pit
                 // re-try this search without pit, if it fails again the normal failure handler is called, if it
@@ -730,7 +738,7 @@ class ClientTransformIndexer extends TransformIndexer {
                         wrappedClient(),
                         TransportSearchAction.TYPE,
                         originalRequest,
-                        listener
+                        recordingListener
                     );
                     return;
                 }
@@ -749,7 +757,7 @@ class ClientTransformIndexer extends TransformIndexer {
                         wrappedClient(),
                         TransportSearchAction.TYPE,
                         originalRequest,
-                        listener
+                        recordingListener
                     );
                     return;
                 }

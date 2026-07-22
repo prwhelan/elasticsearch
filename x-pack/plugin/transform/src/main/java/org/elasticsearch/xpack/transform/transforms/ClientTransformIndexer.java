@@ -699,12 +699,15 @@ class ClientTransformIndexer extends TransformIndexer {
         logger.trace("searchRequest: [{}]", searchRequest);
 
         // record per-search metrics on every success path, including the pit-fallback retries below
-        ActionListener<SearchResponse> recordingListener = listener.delegateFailureAndWrap((l, response) -> {
+        ActionListener<SearchResponse> recordingListener = crossProjectEnabled ? listener.delegateFailureAndWrap((l, response) -> {
             if (response != null) {
-                context.recordSearchMetrics(getConfig().getCredentialId() != null, response.getClusters().hasRemoteClusters());
+                context.recordSearchMetrics(
+                    getConfig().getCredentialId() != null,
+                    response.getClusters() != null && response.getClusters().hasRemoteClusters()
+                );
             }
             l.onResponse(response);
-        });
+        }) : listener;
 
         ClientHelper.executeWithHeadersAsync(
             transformConfig.getHeaders(),

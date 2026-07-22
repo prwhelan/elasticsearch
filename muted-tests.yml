@@ -266,6 +266,9 @@ tests:
 - class: org.elasticsearch.xpack.downsample.DownsampleRateIT
   method: testTimeSeriesQuerying_RandomDocuments
   issue: https://github.com/elastic/elasticsearch/issues/153348
+- class: org.elasticsearch.xpack.downsample.DownsampleRateIT
+  method: testTimeSeriesQuerying_MultipleResets
+  issue: https://github.com/elastic/elasticsearch/issues/154727
 
 # Examples:
 #

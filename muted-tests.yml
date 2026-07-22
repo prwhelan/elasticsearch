@@ -263,6 +263,9 @@ tests:
 - class: org.elasticsearch.http.netty4.Netty4HttpServerTransportTests
   method: testLargeRequestIsNeverDispatched
   issue: https://github.com/elastic/elasticsearch/issues/154657
+- class: org.elasticsearch.xpack.downsample.DownsampleRateIT
+  method: testTimeSeriesQuerying_RandomDocuments
+  issue: https://github.com/elastic/elasticsearch/issues/153348
 
 # Examples:
 #

@@ -269,6 +269,9 @@ tests:
 - class: org.elasticsearch.xpack.downsample.DownsampleRateIT
   method: testTimeSeriesQuerying_MultipleResets
   issue: https://github.com/elastic/elasticsearch/issues/154727
+- class: org.elasticsearch.common.util.BigArraysTests
+  method: testFloatArrayFill
+  issue: https://github.com/elastic/elasticsearch/issues/154777
 
 # Examples:
 #

@@ -275,6 +275,9 @@ tests:
 - class: org.elasticsearch.common.util.BigArraysTests
   method: testByteArrayBulkGet
   issue: https://github.com/elastic/elasticsearch/issues/154778
+- class: org.elasticsearch.xpack.esql.CsvIT
+  method: test {csv-spec:folding.version_GreaterThan_MultiValueConstant}
+  issue: https://github.com/elastic/elasticsearch/issues/154779
 
 # Examples:
 #

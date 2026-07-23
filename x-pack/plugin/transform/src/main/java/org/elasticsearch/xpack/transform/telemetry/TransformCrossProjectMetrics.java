@@ -147,29 +147,36 @@ public final class TransformCrossProjectMetrics extends AbstractLifecycleCompone
 
     /** Iterates the running tasks and refreshes the cached counts. */
     void poll() {
-        long uiam = 0;
-        long legacy = 0;
-        long crossProject = 0;
-        long origin = 0;
-        for (TransformTask task : transformNode.getTransformTasks()) {
-            var uiamAuth = task.getContext().getUiamAuth();
-            if (uiamAuth != null) {
-                if (uiamAuth) {
-                    uiam++;
-                } else {
-                    legacy++;
+        try {
+            long uiam = 0;
+            long legacy = 0;
+            long crossProject = 0;
+            long origin = 0;
+            for (TransformTask task : transformNode.getTransformTasks()) {
+                var uiamAuth = task.getContext().getUiamAuth();
+                if (uiamAuth != null) {
+                    if (uiamAuth) {
+                        uiam++;
+                    } else {
+                        legacy++;
+                    }
+                }
+                var lastSearchCrossProject = task.getContext().getLastSearchCrossProject();
+                if (lastSearchCrossProject != null) {
+                    if (lastSearchCrossProject) {
+                        crossProject++;
+                    } else {
+                        origin++;
+                    }
                 }
             }
-            var lastSearchCrossProject = task.getContext().getLastSearchCrossProject();
-            if (lastSearchCrossProject != null) {
-                if (lastSearchCrossProject) {
-                    crossProject++;
-                } else {
-                    origin++;
-                }
-            }
+            cachedCounts = new CpsCounts(uiam, legacy, crossProject, origin);
+        } catch (Exception e) {
+            logger.atDebug()
+                .withThrowable(e)
+                .log("Failed to emit metrics for Transform Cross-Project. These are best-effort and can be skipped.");
+            cachedCounts = CpsCounts.EMPTY;
         }
-        cachedCounts = new CpsCounts(uiam, legacy, crossProject, origin);
     }
 
     @Override

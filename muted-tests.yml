@@ -272,6 +272,9 @@ tests:
 - class: org.elasticsearch.common.util.BigArraysTests
   method: testFloatArrayFill
   issue: https://github.com/elastic/elasticsearch/issues/154777
+- class: org.elasticsearch.common.util.BigArraysTests
+  method: testByteArrayBulkGet
+  issue: https://github.com/elastic/elasticsearch/issues/154778
 
 # Examples:
 #

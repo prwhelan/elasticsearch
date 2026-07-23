@@ -161,7 +161,7 @@ public class PlanExecutorMetricsTests extends ESTestCase {
             ActionListener<EnrichResolution> listener = (ActionListener<EnrichResolution>) arguments[arguments.length - 1];
             listener.onResponse(new EnrichResolution());
             return null;
-        }).when(enrichResolver).resolvePolicies(any(), any(), any(), any());
+        }).when(enrichResolver).resolvePolicies(any(), any(), any(), any(), any());
         return enrichResolver;
     }
 
@@ -248,6 +248,7 @@ public class PlanExecutorMetricsTests extends ESTestCase {
                     runPhase,
                     MOCK_TRANSPORT_ACTION_SERVICES,
                     EsExecutors.DIRECT_EXECUTOR_SERVICE,
+                    1,
                     () -> false,
                     new ActionListener<>() {
                         @Override
@@ -288,6 +289,7 @@ public class PlanExecutorMetricsTests extends ESTestCase {
                     runPhase,
                     MOCK_TRANSPORT_ACTION_SERVICES,
                     EsExecutors.DIRECT_EXECUTOR_SERVICE,
+                    1,
                     () -> false,
                     new ActionListener<>() {
                         @Override
@@ -637,6 +639,7 @@ public class PlanExecutorMetricsTests extends ESTestCase {
                 runPhase,
                 MOCK_TRANSPORT_ACTION_SERVICES,
                 EsExecutors.DIRECT_EXECUTOR_SERVICE,
+                1,
                 () -> false,
                 listener
             );

@@ -212,6 +212,7 @@ public class TransformUpdaterTests extends ESTestCase {
                 destIndexSettings,
                 cloudCredentialManager,
                 false, // mintCloudCredential
+                null, // callerCredential
                 listener
             ),
             updateResult -> {
@@ -251,6 +252,7 @@ public class TransformUpdaterTests extends ESTestCase {
                 destIndexSettings,
                 cloudCredentialManager,
                 false, // mintCloudCredential
+                null, // callerCredential
                 listener
             ),
             updateResult -> {
@@ -326,6 +328,7 @@ public class TransformUpdaterTests extends ESTestCase {
                 destIndexSettings,
                 cloudCredentialManager,
                 false, // mintCloudCredential
+                null, // callerCredential
                 listener
             ),
             updateResult -> {
@@ -396,6 +399,7 @@ public class TransformUpdaterTests extends ESTestCase {
                 destIndexSettings,
                 cloudCredentialManager,
                 false, // mintCloudCredential
+                null, // callerCredential
                 listener
             ),
             updateResult -> {
@@ -446,6 +450,7 @@ public class TransformUpdaterTests extends ESTestCase {
                 destIndexSettings,
                 cloudCredentialManager,
                 false, // mintCloudCredential
+                null, // callerCredential
                 listener
             ),
             updateResult -> {
@@ -491,6 +496,7 @@ public class TransformUpdaterTests extends ESTestCase {
                 destIndexSettings,
                 cloudCredentialManager,
                 false, // mintCloudCredential
+                null, // callerCredential
                 listener
             ),
             updateResult -> {
@@ -529,6 +535,7 @@ public class TransformUpdaterTests extends ESTestCase {
             destIndexSettings,
             cloudCredentialManager,
             false, // mintCloudCredential
+            null, // callerCredential
             ActionListener.wrap(
                 r -> fail("Should fail due to missing privileges"),
                 e -> assertThat(e.getMessage(), is(equalTo("missing privileges")))
@@ -599,6 +606,7 @@ public class TransformUpdaterTests extends ESTestCase {
                 destIndexSettings,
                 cloudCredentialManager,
                 false, // mintCloudCredential
+                null, // callerCredential
                 listener
             ),
             updateResult -> {
@@ -677,6 +685,7 @@ public class TransformUpdaterTests extends ESTestCase {
                 destIndexSettings,
                 cloudCredentialManager,
                 false, // mintCloudCredential
+                null, // callerCredential
                 listener
             ),
             updateResult -> {

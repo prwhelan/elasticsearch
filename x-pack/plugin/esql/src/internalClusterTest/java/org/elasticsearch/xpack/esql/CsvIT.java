@@ -67,6 +67,7 @@ import org.elasticsearch.xpack.esql.CsvTestUtils.ExpectedResults;
 import org.elasticsearch.xpack.esql.action.ColumnInfoImpl;
 import org.elasticsearch.xpack.esql.action.EsqlCapabilities;
 import org.elasticsearch.xpack.esql.action.EsqlQueryAction;
+import org.elasticsearch.xpack.esql.action.EsqlQueryRequest;
 import org.elasticsearch.xpack.esql.action.EsqlQueryResponse;
 import org.elasticsearch.xpack.esql.action.EsqlResolveFieldsAction;
 import org.elasticsearch.xpack.esql.datasources.datasource.TestEncryptionServicePlugin;
@@ -109,11 +110,11 @@ import java.util.function.Function;
 import java.util.stream.Stream;
 
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
-import static org.elasticsearch.xpack.esql.CsvSpecReader.specParser;
 import static org.elasticsearch.xpack.esql.CsvTestUtils.assumeFalseLogging;
 import static org.elasticsearch.xpack.esql.CsvTestUtils.assumeTrueLogging;
 import static org.elasticsearch.xpack.esql.CsvTestUtils.isEnabled;
 import static org.elasticsearch.xpack.esql.CsvTestUtils.loadCsvSpecValues;
+import static org.elasticsearch.xpack.esql.CsvTestsDataLoader.ALIAS_CONFIGS;
 import static org.elasticsearch.xpack.esql.CsvTestsDataLoader.CSV_DATASET;
 import static org.elasticsearch.xpack.esql.CsvTestsDataLoader.INFERENCE_CONFIGS;
 import static org.elasticsearch.xpack.esql.EsqlTestUtils.TEST_FUNCTION_REGISTRY;
@@ -129,7 +130,7 @@ import static org.hamcrest.Matchers.hasSize;
  * InternalTestCluster` reuses current jvm. This enables debugging all scenarios from IDE.
  * Test data is loaded lazily in order to facilitate faster startup when running/debugging individual test cases.
  */
-@TimeoutSuite(millis = 40 * TimeUnits.MINUTE)
+@TimeoutSuite(millis = TimeUnits.HOUR)
 public class CsvIT extends ESTestCase {
 
     private static final Logger logger = LogManager.getLogger(CsvIT.class);
@@ -179,7 +180,9 @@ public class CsvIT extends ESTestCase {
          * query is not relevant for the variant &mdash; for example, when no field that this variant rewrites
          * appears in the query and so re-running the spec would only re-test the unmodified behavior.
          */
-        String transformQuery(String testId, CsvSpecReader.CsvTestCase testCase);
+        TransformedQuery transformQuery(String testId, CsvSpecReader.CsvTestCase testCase);
+
+        record TransformedQuery(String query, Settings extraPragmas) {}
 
         /**
          * Transforms the expected results loaded from the csv-spec entry before they are compared
@@ -210,8 +213,8 @@ public class CsvIT extends ESTestCase {
         }
 
         @Override
-        public String transformQuery(String testId, CsvSpecReader.CsvTestCase testCase) {
-            return testCase.query;
+        public TransformedQuery transformQuery(String testId, CsvSpecReader.CsvTestCase testCase) {
+            return new TransformedQuery(testCase.query, Settings.EMPTY);
         }
 
         @Override
@@ -257,7 +260,7 @@ public class CsvIT extends ESTestCase {
     public static List<Object[]> readScriptSpec() throws Exception {
         List<URL> urls = classpathResources("/*.csv-spec");
         assertThat("Not enough specs found " + urls, urls, hasSize(greaterThan(0)));
-        return SpecReader.readScriptSpec(urls, specParser());
+        return SpecReader.readScriptSpec(urls, CsvSpecReader::specParser);
     }
 
     @BeforeClass
@@ -349,6 +352,7 @@ public class CsvIT extends ESTestCase {
         );
         CsvTestUtils.checkTestCapabilities(ALL_CAPS, ENABLED_CAPS, testCase.requiredCapabilities);
         CsvTestUtils.checkTestCapabilities(ALL_CAPS, ENABLED_CAPS, testCase.requiredCapabilitiesLocalCluster);
+        CsvTestUtils.checkMissingTestCapabilities(ENABLED_CAPS, testCase.missingCapabilitiesLocalCluster);
         CsvTestUtils.checkPragma(testCase.pragmas);
 
         currentGroupName = groupName;
@@ -358,8 +362,8 @@ public class CsvIT extends ESTestCase {
         inference.ensureNoFailures();
         views.ensureNoFailures();
 
-        String queryToRun = indexLoadStrategy.transformQuery(groupName + "." + testName, testCase);
-        var request = syncEsqlQueryRequest(queryToRun);
+        IndexLoadStrategy.TransformedQuery transformed = indexLoadStrategy.transformQuery(groupName + "." + testName, testCase);
+        EsqlQueryRequest request = syncEsqlQueryRequest(transformed.query());
         if (testCase.requestTimeRangeGte != null && testCase.requestTimeRangeGte.isEmpty() == false) {
             request.filter(new RangeQueryBuilder("@timestamp").gte(testCase.requestTimeRangeGte).lte(testCase.requestTimeRangeLte));
         }
@@ -368,6 +372,7 @@ public class CsvIT extends ESTestCase {
         if (randomBoolean()) {
             pragmaSettings.put("max_concurrent_shards_per_node", randomBoolean() ? 1 : between(2, 10));
         }
+        pragmaSettings.put(transformed.extraPragmas());
         testCase.pragmas.forEach(pragmaSettings::put);
         if (pragmaSettings.build().isEmpty() == false) {
             request.acceptedPragmaRisks(true).pragmas(new QueryPragmas(pragmaSettings.build()));
@@ -445,7 +450,10 @@ public class CsvIT extends ESTestCase {
                 @Override
                 protected boolean apply(String action, ActionRequest request, ActionListener<?> listener) {
                     switch (action) {
-                        case EsqlQueryAction.NAME -> loadViews();
+                        case EsqlQueryAction.NAME -> {
+                            loadViews();
+                            loadAliases();
+                        }
                         case EsqlResolveFieldsAction.NAME -> loadIndices((FieldCapabilitiesRequest) request);
                         case GetInferenceModelAction.NAME -> loadInference((GetInferenceModelAction.Request) request);
                     }
@@ -501,7 +509,7 @@ public class CsvIT extends ESTestCase {
 
     private static void loadViews() {
         // TODO We should instead load views once and never unload them
-        if ("views".equals(currentGroupName) || "approximation".equals(currentGroupName)) {
+        if ("views".equals(currentGroupName) || "approximation".equals(currentGroupName) || "unmapped-load".equals(currentGroupName)) {
             CsvTestsDataLoader.VIEW_CONFIGS.forEach((name, view) -> {
                 if (view.requiredCapabilities().stream().allMatch(EsqlCapabilities.Cap::isEnabled)) {
                     views.maybeLoad(name, view);
@@ -509,6 +517,18 @@ public class CsvIT extends ESTestCase {
             });
         } else {
             views.unloadAll();
+        }
+    }
+
+    private static void loadAliases() {
+        if ("views".equals(currentGroupName)) {
+            ALIAS_CONFIGS.forEach((name, alias) -> {
+                var backing = CSV_DATASET.get(alias.indexName());
+                if (backing != null) {
+                    indices.maybeLoad(backing.indexName(), backing);
+                }
+                aliases.maybeLoad(alias.aliasName(), alias);
+            });
         }
     }
 
@@ -539,6 +559,16 @@ public class CsvIT extends ESTestCase {
                 }
                 return CSV_DATASET.values().stream().filter(ds -> ds.indexName().startsWith(prefix));
             } else {
+                var aliasConfig = ALIAS_CONFIGS.get(pattern);
+                if (aliasConfig != null) {
+                    // Load the backing index first, then create the alias.
+                    var backing = CSV_DATASET.get(aliasConfig.indexName());
+                    if (backing != null) {
+                        indices.maybeLoad(backing.indexName(), backing);
+                    }
+                    aliases.maybeLoad(aliasConfig.aliasName(), aliasConfig);
+                    return Stream.empty();
+                }
                 return Stream.of(CSV_DATASET.get(pattern));
             }
         })
@@ -572,9 +602,19 @@ public class CsvIT extends ESTestCase {
             assertAcked(cluster.client().admin().indices().prepareCreate(dataset.indexName()).setMapping(mapping).setSettings(settings));
             if (dataset.dataFileName() != null) {
                 var bulk = cluster.client().prepareBulk().setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE);
+
                 for (var document : CsvTestsDataLoader.readCsvDocuments(dataset.streamData(), dataset.allowSubFields())) {
                     String source = indexLoadStrategy.transformDocument(dataset, document.json().toString());
-                    bulk.add(cluster.client().prepareIndex(dataset.indexName()).setId(document.id()).setSource(source, XContentType.JSON));
+                    var indexRequestBuilder = cluster.client()
+                        .prepareIndex(dataset.indexName())
+                        .setId(document.id())
+                        .setSource(source, XContentType.JSON);
+                    if (document.slice() != null) {
+                        indexRequestBuilder.setRouting(document.slice());
+                        indexRequestBuilder.setRoutingFromSlice(true);
+                    }
+
+                    bulk.add(indexRequestBuilder);
                     if (bulk.numberOfActions() >= BULK_INDEX_BATCH_SIZE) {
                         var result = bulk.get();
                         assertFalse(
@@ -664,6 +704,20 @@ public class CsvIT extends ESTestCase {
                         DeleteViewAction.INSTANCE,
                         new DeleteViewAction.Request(TEST_REQUEST_TIMEOUT, TEST_REQUEST_TIMEOUT, new String[] { name })
                     )
+            );
+        }
+    };
+
+    private static ResourceLoader<CsvTestsDataLoader.AliasConfig> aliases = new ResourceLoader<>() {
+        @Override
+        protected void load(CsvTestsDataLoader.AliasConfig alias) {
+            logger.info("Loading alias [{}] -> [{}]", alias.aliasName(), alias.indexName());
+            assertAcked(
+                cluster.client()
+                    .admin()
+                    .indices()
+                    .prepareAliases(TEST_REQUEST_TIMEOUT, TEST_REQUEST_TIMEOUT)
+                    .addAlias(alias.indexName(), alias.aliasName())
             );
         }
     };

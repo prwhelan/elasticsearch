@@ -10,13 +10,13 @@
 package org.elasticsearch.index.codec.vectors.diskbbq.calibrate;
 
 import org.apache.lucene.index.VectorSimilarityFunction;
+import org.apache.lucene.util.IntroSelector;
 import org.apache.lucene.util.IntroSorter;
 import org.elasticsearch.core.WelfordVariance;
 import org.elasticsearch.index.codec.vectors.OptimizedScalarQuantizer;
 import org.elasticsearch.index.codec.vectors.cluster.CentroidOps;
 import org.elasticsearch.index.codec.vectors.cluster.HierarchicalKMeans;
 import org.elasticsearch.index.codec.vectors.cluster.KMeansFloatVectorValues;
-import org.elasticsearch.index.codec.vectors.cluster.KMeansWithOverspill;
 import org.elasticsearch.logging.LogManager;
 import org.elasticsearch.logging.Logger;
 import org.elasticsearch.simdvec.ESVectorUtil;
@@ -87,13 +87,14 @@ public final class ErrorModel {
         } else {
             int targetSize = Math.max(1, nDocClusters / effectiveQueryClusters);
             KMeansFloatVectorValues centroidVectors = KMeansFloatVectorValues.build(Arrays.asList(docCentroids), null, dim);
-            KMeansWithOverspill<float[]> queryClustering = kmeans.cluster(centroidVectors, targetSize, warmStartQueryCentroids);
+            var queryClustering = kmeans.cluster(centroidVectors, targetSize, warmStartQueryCentroids);
             queryCentroids = queryClustering.centroids();
             docCentroidAssignments = queryClustering.assignments();
         }
         int actualQueryClusters = queryCentroids.length;
 
-        double[] centroidDotCentroid = scratch.centroidDotCentroid;
+        // Cluster-count scratch: sized to the actual cluster counts (~nDocs / vectorsPerCluster), not maxNDocs.
+        double[] centroidDotCentroid = new double[nDocClusters];
         for (int i = 0; i < nDocClusters; i++) {
             centroidDotCentroid[i] = ESVectorUtil.dotProduct(queryCentroids[docCentroidAssignments[i]], docCentroids[i]);
         }
@@ -131,17 +132,39 @@ public final class ErrorModel {
         double dScale = 1.0 / ((1 << dbits) - 1);
         double qScale = 1.0 / ((1 << qbits) - 1);
 
-        float[] queryLower = scratch.queryLower;
-        float[] queryUpper = scratch.queryUpper;
-        int[] queryL1 = scratch.queryL1;
-        byte[][] queryQuantized = scratch.queryQuantized;
+        float[] queryLower = new float[actualQueryClusters];
+        float[] queryUpper = new float[actualQueryClusters];
+        int[] queryL1 = new int[actualQueryClusters];
+        byte[][] queryQuantized = new byte[actualQueryClusters][dim];
 
         float[] queryScratch = scratch.queryScratch;
         float[] preconditionScratch = scratch.preconditionScratch;
 
-        double[] queryDotCentroid = scratch.queryDotCentroid;
+        double[] queryDotCentroid = new double[nDocClusters];
         double[] simOsq = scratch.simOsq;
         int[] order = scratch.order;
+
+        // Group doc indices by their query cluster once (assignments are query-independent), so the
+        // packed-byte dot product can be evaluated four docs at a time against the shared quantized
+        // query operand for that cluster. bucketedDocs holds doc indices sorted by cluster;
+        // bucketStart is the CSR offset array with cluster c occupying [bucketStart[c], bucketStart[c+1]).
+        int[] bucketStart = scratch.bucketStart;
+        int[] bucketedDocs = scratch.bucketedDocs;
+        int[] bucketCursor = scratch.bucketCursor;
+        int[] intDots = scratch.intDots;
+        float[] bulkDistances = scratch.bulkDistances;
+        Arrays.fill(bucketStart, 0, actualQueryClusters + 1, 0);
+        for (int i = 0; i < nDocs; i++) {
+            bucketStart[docCentroidAssignments[docAssignments[i]] + 1]++;
+        }
+        for (int c = 0; c < actualQueryClusters; c++) {
+            bucketStart[c + 1] += bucketStart[c];
+        }
+        System.arraycopy(bucketStart, 0, bucketCursor, 0, actualQueryClusters);
+        for (int i = 0; i < nDocs; i++) {
+            int qc = docCentroidAssignments[docAssignments[i]];
+            bucketedDocs[bucketCursor[qc]++] = i;
+        }
 
         for (int queryOrdinal : source.queryOrdinals()) {
             CalibrationUtils.materializeCalibrationQuery(
@@ -168,6 +191,35 @@ public final class ErrorModel {
                 queryDotCentroid[i] = ESVectorUtil.dotProduct(queryScratch, docCentroids[i]);
             }
 
+            // Bulk-evaluate the packed-byte doc·query dot products four docs at a time, one query
+            // cluster at a time so the shared quantized query operand is reused across the group.
+            for (int c = 0; c < actualQueryClusters; c++) {
+                byte[] qq = queryQuantized[c];
+                int p = bucketStart[c];
+                int end = bucketStart[c + 1];
+                int bulkLimit = end - 3;
+                for (; p < bulkLimit; p += 4) {
+                    int d0 = bucketedDocs[p], d1 = bucketedDocs[p + 1], d2 = bucketedDocs[p + 2], d3 = bucketedDocs[p + 3];
+                    ESVectorUtil.dotProductBulk(
+                        qq,
+                        docQuantized[d0],
+                        docQuantized[d1],
+                        docQuantized[d2],
+                        docQuantized[d3],
+                        0,
+                        bulkDistances
+                    );
+                    intDots[d0] = Math.round(bulkDistances[0]);
+                    intDots[d1] = Math.round(bulkDistances[1]);
+                    intDots[d2] = Math.round(bulkDistances[2]);
+                    intDots[d3] = Math.round(bulkDistances[3]);
+                }
+                for (; p < end; p++) {
+                    int d = bucketedDocs[p];
+                    intDots[d] = Math.round(ESVectorUtil.dotProduct(qq, docQuantized[d]));
+                }
+            }
+
             for (int i = 0; i < nDocs; i++) {
                 int dc = docAssignments[i];
                 int qc = docCentroidAssignments[dc];
@@ -177,8 +229,7 @@ public final class ErrorModel {
                 double aq = queryLower[qc];
                 double lq = qScale * (queryUpper[qc] - queryLower[qc]);
 
-                long intDot = (long) ESVectorUtil.dotProduct(docQuantized[i], queryQuantized[qc]);
-                double dotEst = ad * aq * dim + aq * ld * docL1[i] + ad * lq * queryL1[qc] + ld * lq * intDot;
+                double dotEst = ad * aq * dim + aq * ld * docL1[i] + ad * lq * queryL1[qc] + ld * lq * intDots[i];
 
                 dotEst += corpusDotCentroid[i] + queryDotCentroid[dc] - centroidDotCentroid[dc];
 
@@ -191,9 +242,8 @@ public final class ErrorModel {
                 simOsq[i] = dotEst;
             }
 
-            sortIndicesByKeysDescending(simOsq, order, nDocs);
-
             int topN = Math.min(5 * source.k(), nDocs);
+            selectTopNDescending(simOsq, order, nDocs, topN);
             for (int i = 0; i < topN; i++) {
                 int docIdx = order[i];
                 float[] doc = source.vectors().vectorValue(source.corpusOrdinals()[docIdx]);
@@ -232,7 +282,7 @@ public final class ErrorModel {
         QuantizedErrorScratch scratch
     ) throws IOException {
         KMeansFloatVectorValues corpusVectors = KMeansFloatVectorValues.wrap(source.vectors(), source.corpusOrdinals(), nDocs);
-        KMeansWithOverspill<float[]> docClusters = kmeans.cluster(corpusVectors, nDocsPerCluster, warmStartDocCentroids);
+        var docClusters = kmeans.cluster(corpusVectors, nDocsPerCluster, warmStartDocCentroids);
 
         float[][] docCentroids = docClusters.centroids();
         int[] flatAssignments = docClusters.assignments();
@@ -260,12 +310,19 @@ public final class ErrorModel {
     record QuantizedErrorComputeResult(double std, float[][] docCentroids, float[][] queryCentroids) {}
 
     public static ErrorScalingFit estimateErrorScalingFit(CalibrationSource source, int nDocsPerCluster) {
+        return estimateErrorScalingFit(source, nDocsPerCluster, HierarchicalKMeans.ofSerial(CentroidOps.FLOAT, source.dim()));
+    }
+
+    private static ErrorScalingFit estimateErrorScalingFit(
+        CalibrationSource source,
+        int nDocsPerCluster,
+        HierarchicalKMeans<float[]> kmeans
+    ) {
         logger.debug("Fitting error scaling model");
         long scalingStartNanos = System.nanoTime();
 
         double logNDocsPerCluster = Math.log(nDocsPerCluster);
         Regression.OLSAccumulator state = new Regression.OLSAccumulator();
-        HierarchicalKMeans<float[]> kmeans = HierarchicalKMeans.ofSerial(CentroidOps.FLOAT, source.dim());
         float[][] warmStartDocCentroids = null;
         float[][] warmStartQueryCentroids = null;
         int corpusLength;
@@ -301,7 +358,7 @@ public final class ErrorModel {
                 warmStartQueryCentroids = computed.queryCentroids();
                 double x = logNDocsPerCluster - Math.log(sampleSize);
                 double y = Math.log(Math.max(computed.std(), 1e-38));
-                state.update(new double[] { x }, new double[] { y });
+                state.update(x, y);
                 if ((i + 1) % 4 == 0) {
                     logger.debug("Processed {}/{} scaling samples", i + 1, SAMPLE_SIZES_SCALING.length);
                 }
@@ -310,13 +367,32 @@ public final class ErrorModel {
             }
         }
 
-        Regression.OLSResult params = state.fit();
-        if (params == Regression.OLSResult.ZERO) {
+        Regression.OLSResult rawParams = state.fit();
+        if (rawParams == Regression.OLSResult.ZERO) {
             return new ErrorScalingFit(
                 new QuantizationErrorStdModel(Regression.OLSResult.ZERO),
                 warmStartDocCentroids,
                 warmStartQueryCentroids
             );
+        }
+
+        // Clamp to 0 so the error model degenerates to a constant (no corpus-size extrapolation) rather than
+        // producing unbounded estimates.
+        // This can happen when the k-means warm-start introduces non-monotone error steps
+        // over the narrow x-range of the sweep (~1.3 log-units for typical nDocsPerCluster).
+        Regression.OLSResult params;
+        if (rawParams.beta1() < 0) {
+            logger.debug(
+                () -> format(
+                    "Error scaling fit produced negative slope [%.4f] (R²=[%.4f]); "
+                        + "clamping to 0 (constant error model, no corpus-size extrapolation).",
+                    rawParams.beta1(),
+                    state.r2(rawParams)
+                )
+            );
+            params = new Regression.OLSResult(rawParams.beta0(), 0.0, 0, 0, 0, rawParams.sigmaSq());
+        } else {
+            params = rawParams;
         }
 
         double scalingSeconds = (System.nanoTime() - scalingStartNanos) / 1_000_000_000.0;
@@ -348,12 +424,31 @@ public final class ErrorModel {
         int dbits,
         int nDocsPerCluster
     ) {
+        return estimateMagnitudeModel(
+            scalingFit,
+            source,
+            usePreconditionedQueries,
+            qbits,
+            dbits,
+            nDocsPerCluster,
+            HierarchicalKMeans.ofSerial(CentroidOps.FLOAT, source.dim())
+        );
+    }
+
+    private static QuantizationErrorStdModel estimateMagnitudeModel(
+        ErrorScalingFit scalingFit,
+        CalibrationSource source,
+        boolean usePreconditionedQueries,
+        int qbits,
+        int dbits,
+        int nDocsPerCluster,
+        HierarchicalKMeans<float[]> kmeans
+    ) {
         QuantizationErrorStdModel scalingModel = scalingFit.scalingModel();
         long magnitudeStartNanos = System.nanoTime();
 
         double logNDocsPerCluster = Math.log(nDocsPerCluster);
         Regression.OLSAccumulator state = new Regression.OLSAccumulator();
-        HierarchicalKMeans<float[]> kmeans = HierarchicalKMeans.ofSerial(CentroidOps.FLOAT, source.dim());
         float[][] docWarmStart = scalingFit.lastDocCentroids;
         float[][] queryWarmStart = scalingFit.lastQueryCentroids;
 
@@ -387,7 +482,7 @@ public final class ErrorModel {
                 queryWarmStart = computed.queryCentroids();
                 double x = logNDocsPerCluster - Math.log(sampleSize);
                 double y = Math.log(Math.max(computed.std(), 1e-38));
-                state.update(new double[] { x }, new double[] { y });
+                state.update(x, y);
             } catch (IOException e) {
                 logger.warn("failed to compute quantization error std for magnitude sample size [{}]", sampleSize, e);
             }
@@ -412,20 +507,126 @@ public final class ErrorModel {
         return new QuantizationErrorStdModel(params);
     }
 
+    /** Corpus sample size for the single-shot real-residual magnitude measurement. */
+    static final int REAL_RESIDUAL_SAMPLE = 2048;
+
     /**
-     * Sorts {@code idx[0..len)} into a permutation of {@code 0..len-1} such that
-     * {@code keys[idx[i]]} is non-increasing (descending).
+     * Opaque per-sweep state for the real-residual magnitude path: reusable OSQ scratch, a serial k-means
+     * instance, and the (encoding-independent) clustering from the first candidate, reused as a warm start
+     * for subsequent candidates so k-means is not recomputed from scratch per encoding. Construct once per
+     * calibration via {@link #newRealResidualState} and thread through every candidate.
      */
-    private static void sortIndicesByKeysDescending(double[] keys, int[] idx, int len) {
-        if (len < 2) {
-            if (len == 1) {
-                idx[0] = 0;
-            }
-            return;
+    public static final class RealResidualState {
+        private final QuantizedErrorScratch scratch;
+        private final HierarchicalKMeans<float[]> kmeans;
+        private final int nDocs;
+        private QuantizedErrorComputeResult shared;
+
+        private RealResidualState(CalibrationSource source) {
+            this.nDocs = Math.min(REAL_RESIDUAL_SAMPLE, source.corpusOrdinals().length);
+            this.kmeans = HierarchicalKMeans.ofSerial(CentroidOps.FLOAT, source.dim());
+            this.scratch = new QuantizedErrorScratch(
+                nDocs,
+                source.dim(),
+                source.cosine(),
+                source.similarityFunction() == VectorSimilarityFunction.EUCLIDEAN,
+                source.preconditioner() != null
+            );
         }
+
+        public int ndocs() {
+            return nDocs;
+        }
+    }
+
+    /** Creates the shared state for a real-residual magnitude sweep over {@code source}. */
+    public static RealResidualState newRealResidualState(CalibrationSource source) {
+        return new RealResidualState(source);
+    }
+
+    /**
+     * Estimates the quantization error-std model for {@code (qbits, dbits)} from <em>real</em> corpus
+     * residuals. The clustering warm start is reused across candidates via {@code state} so k-means is
+     * not recomputed per encoding.
+     * <p>
+     * Measures OSQ error once at {@link #REAL_RESIDUAL_SAMPLE} and anchors the intercept at that sample
+     * size. The manifold slope {@code invDim} is used as the scaling exponent, so evaluating at the real corpus size {@code N}
+     * extrapolates as {@code errorStd = measuredStd × (REAL_RESIDUAL_SAMPLE / N)^invDim}.
+     */
+    public static QuantizationErrorStdModel estimateMagnitudeFromRealResiduals(
+        double invDim,
+        CalibrationSource source,
+        boolean usePreconditionedQueries,
+        int qbits,
+        int dbits,
+        int nDocsPerCluster,
+        RealResidualState state
+    ) throws IOException {
+        float[][] warmDoc = state.shared == null ? null : state.shared.docCentroids();
+        float[][] warmQuery = state.shared == null ? null : state.shared.queryCentroids();
+        QuantizedErrorComputeResult r = quantizedRepErrorStdWithCentroids(
+            source,
+            usePreconditionedQueries,
+            state.nDocs,
+            nDocsPerCluster,
+            qbits,
+            dbits,
+            state.kmeans,
+            warmDoc,
+            warmQuery,
+            state.scratch
+        );
+        if (state.shared == null) {
+            state.shared = r;
+        }
+        // 1/d is negative for similarities like cosine, so use -invDim
+        double invDimEffective = ManifoldModel.isDotLike(source.similarityFunction()) ? -invDim : invDim;
+        // single measurement anchored at state.nDocs (not numVectors),
+        // so evaluating at N gives measuredStd × (state.nDocs / N)^invDim
+        double beta0 = Math.log(Math.max(r.std(), 1e-38)) - invDimEffective * (Math.log(nDocsPerCluster) - Math.log(state.nDocs));
+        return new QuantizationErrorStdModel(new Regression.OLSResult(beta0, invDim, 0, 0, 0, 0));
+    }
+
+    /**
+     * Fills {@code idx[0..n)} with the indices of the {@code n} largest {@code keys[0..len)}, ordered by
+     * descending key.
+     * Requires {@code idx.length >= len} and {@code 0 <= n <= len}. Survivors are ordered descending so the caller
+     * accumulates error moments largest-first.
+     */
+    static void selectTopNDescending(double[] keys, int[] idx, int len, int n) {
         for (int i = 0; i < len; i++) {
             idx[i] = i;
         }
+        int m = Math.min(n, len);
+        if (m <= 0) {
+            return;
+        }
+        if (m < len) {
+            // partition idx so idx[0..m) hold the m largest keys (unordered). select(from, to, k) leaves the k
+            // elements that sort first in [from, k); under this descending comparator those are the m largest.
+            new IntroSelector() {
+                double pivot;
+
+                @Override
+                protected void swap(int i, int j) {
+                    int tmp = idx[i];
+                    idx[i] = idx[j];
+                    idx[j] = tmp;
+                }
+
+                @Override
+                protected void setPivot(int i) {
+                    pivot = keys[idx[i]];
+                }
+
+                @Override
+                protected int comparePivot(int j) {
+                    // descending: pivot sorts before j when pivot's key is larger
+                    return Double.compare(keys[idx[j]], pivot);
+                }
+            }.select(0, len, m);
+        }
+        // order the m selected indices descending by key.
         new IntroSorter() {
             double pivot;
 
@@ -443,10 +644,10 @@ public final class ErrorModel {
 
             @Override
             protected int comparePivot(int j) {
-                // descending: pivot > keys[idx[j]] means pivot should come first
+                // descending: pivot sorts before j when pivot's key is larger
                 return Double.compare(keys[idx[j]], pivot);
             }
-        }.sort(0, len);
+        }.sort(0, m);
     }
 
     /**
@@ -480,18 +681,20 @@ public final class ErrorModel {
         final double[] simOsq;
         /** per-query-loop: sort permutation over simOsq, indexed [0..nDocs) */
         final int[] order;
+        /** per-query-loop: raw packed-byte doc·query dot products, indexed [0..nDocs) */
+        final int[] intDots;
+        /** doc indices grouped by query cluster, so bulk scoring reuses one query operand */
+        final int[] bucketedDocs;
+        /** CSR-style start offset of each query cluster's slice in {@link #bucketedDocs} */
+        final int[] bucketStart;
+        /** fill cursors used while populating {@link #bucketedDocs} */
+        final int[] bucketCursor;
+        /** 4-lane scratch for {@link ESVectorUtil#dotProductBulk(byte[], byte[], byte[], byte[], byte[], int, float[])} */
+        final float[] bulkDistances;
 
-        // per-query-cluster and per-doc-cluster arrays.
-        // Although the target is N_QUERY_CLUSTERS query clusters, k-means can return up to
-        // nDocClusters centroids (e.g. when targetSize=1). nDocClusters is itself bounded by
-        // nDocs <= maxNDocs, so maxNDocs is the safe upper bound for all cluster-count arrays.
-        final float[] queryLower;
-        final float[] queryUpper;
-        final int[] queryL1;
-        final byte[][] queryQuantized;
-        final double[] centroidDotCentroid;
-        /** per-query-loop: query · each doc-centroid, indexed [0..nDocClusters) */
-        final double[] queryDotCentroid;
+        // Cluster-count arrays (queryLower/Upper/L1/queryQuantized, centroidDotCentroid, queryDotCentroid) are
+        // indexed by cluster (nDocClusters / actualQueryClusters ~= nDocs / vectorsPerCluster).
+        // they are allocated per call in quantizedRepErrorStd at the exact cluster count, which is known once k-means has run.
 
         QuantizedErrorScratch(int maxNDocs, int dim, boolean cosine, boolean euclidean, boolean hasPreconditioner) {
             residualScratch = new float[dim];
@@ -508,14 +711,11 @@ public final class ErrorModel {
             docDotDoc = euclidean ? new double[maxNDocs] : null;
             simOsq = new double[maxNDocs];
             order = new int[maxNDocs];
-
-            queryLower = new float[maxNDocs];
-            queryUpper = new float[maxNDocs];
-            queryL1 = new int[maxNDocs];
-            queryQuantized = new byte[maxNDocs][dim];
-
-            centroidDotCentroid = new double[maxNDocs];
-            queryDotCentroid = new double[maxNDocs];
+            intDots = new int[maxNDocs];
+            bucketedDocs = new int[maxNDocs];
+            bucketStart = new int[maxNDocs + 1];
+            bucketCursor = new int[maxNDocs];
+            bulkDistances = new float[4];
         }
     }
 }

@@ -20,6 +20,7 @@ import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Add
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Div;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mod;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mul;
+import org.elasticsearch.xpack.esql.plan.QuerySettings;
 import org.elasticsearch.xpack.esql.session.Configuration;
 
 import java.time.ZoneOffset;
@@ -29,6 +30,27 @@ import java.time.temporal.ChronoField;
  * PromQL built-in function definitions that do not correspond to a dedicated ES|QL function class.
  */
 public class PromqlBuiltinFunctionDefinitions {
+
+    /**
+     * {@code topk(k, v)} selects the {@code k} series with the highest values rather than reducing the input
+     * vector to a single value, so - unlike {@code sum}/{@code avg}/{@code max}/{@code min} - it has no ES|QL
+     * aggregate function to build: the ctor reference passes the input field through unchanged, and the PromQL
+     * translator (see {@code TranslatePromqlToEsqlPlan#wrapWithTopNBy}) appends the ranking/limiting step itself.
+     */
+    public static final PromqlFunctionDefinition TOPK = PromqlFunctionDefinition.def()
+        .acrossSeriesBinaryReduction(PromqlFunctionDefinition.K, (source, field, filter, window, k) -> field)
+        .description(
+            "Returns `k` time series with the highest values, keeping their full label set. "
+                + "When used with `by`, `topk` ranks independently within each group."
+        )
+        .example("topk(3, http_requests_total)")
+        .stack(PromqlFunctionDefinition.STACK_GA_9_5)
+        .differenceFromPrometheus(
+            "A `k` close to Integer.MAX_VALUE can trip {{es}}'s circuit breaker (the execution engine allocates a "
+                + "buffer sized to `k`, not to the number of matching series), whereas Prometheus has no equivalent limit. "
+                + "A `without` grouping clause is not yet supported."
+        )
+        .name("topk");
 
     public static final PromqlFunctionDefinition VECTOR = PromqlFunctionDefinition.def()
         .vectorConversion()
@@ -75,7 +97,7 @@ public class PromqlBuiltinFunctionDefinitions {
                         source,
                         Literal.keyword(source, ChronoField.DAY_OF_WEEK.name()),
                         date,
-                        configuration.withZoneId(ZoneOffset.UTC)
+                        configuration.withSetting(QuerySettings.TIME_ZONE, ZoneOffset.UTC)
                     )
                 ),
                 Literal.fromDouble(source, 7.0)
@@ -106,7 +128,7 @@ public class PromqlBuiltinFunctionDefinitions {
                     Literal.keyword(source, "day"),
                     Literal.keyword(source, "month"),
                     date,
-                    configuration.withZoneId(ZoneOffset.UTC)
+                    configuration.withSetting(QuerySettings.TIME_ZONE, ZoneOffset.UTC)
                 )
             )
         )
@@ -163,7 +185,12 @@ public class PromqlBuiltinFunctionDefinitions {
             .dateTime(
                 (source, date, configuration) -> new ToDouble(
                     source,
-                    new DateExtract(source, Literal.keyword(source, field.name()), date, configuration.withZoneId(ZoneOffset.UTC))
+                    new DateExtract(
+                        source,
+                        Literal.keyword(source, field.name()),
+                        date,
+                        configuration.withSetting(QuerySettings.TIME_ZONE, ZoneOffset.UTC)
+                    )
                 )
             )
             .counterSupport(PromqlFunctionDefinition.CounterSupport.SUPPORTED);

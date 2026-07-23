@@ -16,6 +16,7 @@ import org.elasticsearch.xpack.esql.expression.function.FunctionDefinition;
 import org.elasticsearch.xpack.esql.expression.function.scalar.convert.ToDatetime;
 import org.elasticsearch.xpack.esql.expression.function.scalar.convert.ToDouble;
 import org.elasticsearch.xpack.esql.expression.predicate.operator.arithmetic.Mul;
+import org.elasticsearch.xpack.esql.plan.QuerySettings;
 import org.elasticsearch.xpack.esql.plan.logical.promql.PromqlDataType;
 import org.elasticsearch.xpack.esql.session.Configuration;
 
@@ -264,6 +265,7 @@ public final class PromqlFunctionDefinition {
     );
     public static final PromqlParamInfo SCALAR = PromqlParamInfo.child("s", PromqlDataType.SCALAR, "Scalar value.");
     public static final PromqlParamInfo QUANTILE = PromqlParamInfo.of("φ", PromqlDataType.SCALAR, "Quantile value (0 ≤ φ ≤ 1).");
+    public static final PromqlParamInfo K = PromqlParamInfo.of("k", PromqlDataType.SCALAR, "Number of series to keep.");
     public static final PromqlParamInfo TO_NEAREST = PromqlParamInfo.optional(
         "to_nearest",
         PromqlDataType.SCALAR,
@@ -580,6 +582,23 @@ public final class PromqlFunctionDefinition {
             return this;
         }
 
+        public PromqlFunctionDefinition.Builder acrossSeriesBinaryReduction(
+            PromqlParamInfo paramInfo,
+            FunctionDefinition.QuaternaryBuilder<? extends Expression> ctorRef
+        ) {
+            this.functionType = FunctionType.ACROSS_SERIES_REDUCTION;
+            this.arity = PromqlFunctionArity.TWO;
+            this.builder = (source, target, ctx, extraParams) -> ctorRef.build(
+                source,
+                target,
+                Literal.TRUE,
+                ctx.window(),
+                extraParams.getFirst()
+            );
+            this.params = List.of(paramInfo, INSTANT_VECTOR);
+            return this;
+        }
+
         public PromqlFunctionDefinition.Builder histogramUnary(BiFunction<Source, Expression, ? extends Expression> ctorRef) {
             this.functionType = FunctionType.HISTOGRAM;
             this.arity = PromqlFunctionArity.ONE;
@@ -633,7 +652,7 @@ public final class PromqlFunctionDefinition {
                         new ToDatetime(
                             source,
                             new Mul(source, new ToDouble(source, date), Literal.fromDouble(source, 1000.0)),
-                            ctx.configuration().withZoneId(ZoneOffset.UTC)
+                            ctx.configuration().withSetting(QuerySettings.TIME_ZONE, ZoneOffset.UTC)
                         ),
                         ctx.configuration()
                     );

@@ -81,7 +81,6 @@ import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 public class TransformUpdaterTests extends ESTestCase {
 
@@ -715,7 +714,7 @@ public class TransformUpdaterTests extends ESTestCase {
         TransformConfig legacyConfig = legacyTransformConfig(randomAlphaOfLengthBetween(1, 10), null);
         transformConfigManager.putTransformConfiguration(legacyConfig, ActionListener.noop());
 
-        stubMintWithNullTokenId(cloudCredentialManager);
+        CloudCredential callerCredential = stubMintWithNullTokenId(cloudCredentialManager);
 
         assertUpdate(
             listener -> TransformUpdater.updateTransform(
@@ -737,6 +736,7 @@ public class TransformUpdaterTests extends ESTestCase {
                 destIndexSettings,
                 cloudCredentialManager,
                 true, // mintCloudCredential — UIAM migration
+                callerCredential,
                 listener
             ),
             updateResult -> assertThat(
@@ -759,7 +759,7 @@ public class TransformUpdaterTests extends ESTestCase {
         TransformConfig legacyConfigWithRouting = legacyTransformConfig(randomAlphaOfLengthBetween(1, 10), "_alias:linked_project");
         transformConfigManager.putTransformConfiguration(legacyConfigWithRouting, ActionListener.noop());
 
-        stubMintWithNullTokenId(cloudCredentialManager);
+        CloudCredential callerCredential = stubMintWithNullTokenId(cloudCredentialManager);
 
         assertUpdate(
             listener -> TransformUpdater.updateTransform(
@@ -781,6 +781,7 @@ public class TransformUpdaterTests extends ESTestCase {
                 destIndexSettings,
                 cloudCredentialManager,
                 true,
+                callerCredential,
                 listener
             ),
             updateResult -> assertThat(
@@ -802,7 +803,7 @@ public class TransformUpdaterTests extends ESTestCase {
         TransformConfig legacyConfig = legacyTransformConfig(randomAlphaOfLengthBetween(1, 10), null);
         transformConfigManager.putTransformConfiguration(legacyConfig, ActionListener.noop());
 
-        stubMintWithNullTokenId(cloudCredentialManager);
+        CloudCredential callerCredential = stubMintWithNullTokenId(cloudCredentialManager);
 
         TransformConfigUpdate updateWithRouting = new TransformConfigUpdate(
             new SourceConfig(legacyConfig.getSource().getIndex(), QueryConfig.matchAll(), Collections.emptyMap(), "_alias:explicit"),
@@ -835,6 +836,7 @@ public class TransformUpdaterTests extends ESTestCase {
                 destIndexSettings,
                 cloudCredentialManager,
                 true,
+                callerCredential,
                 listener
             ),
             updateResult -> assertThat(
@@ -860,7 +862,7 @@ public class TransformUpdaterTests extends ESTestCase {
         TransformConfig legacyConfig = legacyTransformConfig(randomAlphaOfLengthBetween(1, 10), null);
         transformConfigManager.putTransformConfiguration(legacyConfig, ActionListener.noop());
 
-        stubMintWithNullTokenId(cloudCredentialManager);
+        CloudCredential callerCredential = stubMintWithNullTokenId(cloudCredentialManager);
 
         TransformConfigUpdate updateWithExplicitSourceNoRouting = new TransformConfigUpdate(
             new SourceConfig(legacyConfig.getSource().getIndex(), QueryConfig.matchAll(), Collections.emptyMap(), null),
@@ -893,6 +895,7 @@ public class TransformUpdaterTests extends ESTestCase {
                 destIndexSettings,
                 cloudCredentialManager,
                 true, // mintCloudCredential — UIAM migration
+                callerCredential,
                 listener
             ),
             updateResult -> assertThat(
@@ -916,7 +919,7 @@ public class TransformUpdaterTests extends ESTestCase {
             .build();
         transformConfigManager.putTransformConfiguration(migratedConfig, ActionListener.noop());
 
-        stubMintWithNullTokenId(cloudCredentialManager);
+        CloudCredential callerCredential = stubMintWithNullTokenId(cloudCredentialManager);
 
         assertUpdate(
             listener -> TransformUpdater.updateTransform(
@@ -938,6 +941,7 @@ public class TransformUpdaterTests extends ESTestCase {
                 destIndexSettings,
                 cloudCredentialManager,
                 true,
+                callerCredential,
                 listener
             ),
             updateResult -> assertThat(
@@ -960,7 +964,7 @@ public class TransformUpdaterTests extends ESTestCase {
         transformConfigManager.putTransformConfiguration(legacyConfig, ActionListener.noop());
 
         // cloudCredentialManager is mocked — no stubs needed since mintCloudCredential=false means
-        // currentCallerCredential() and mintAndPersist() are never called on this path.
+        // mintAndPersist() is never called on this path.
 
         assertUpdate(
             listener -> TransformUpdater.updateTransform(
@@ -982,6 +986,7 @@ public class TransformUpdaterTests extends ESTestCase {
                 destIndexSettings,
                 cloudCredentialManager,
                 false, // mintCloudCredential=false — Reset/Upgrade path, not a migration
+                null, // callerCredential
                 listener
             ),
             updateResult -> assertThat(
@@ -1006,7 +1011,7 @@ public class TransformUpdaterTests extends ESTestCase {
         TransformConfig legacyConfig = legacyTransformConfig(randomAlphaOfLengthBetween(1, 10), null);
         transformConfigManager.putTransformConfiguration(legacyConfig, ActionListener.noop());
 
-        stubMintWithNullTokenId(cloudCredentialManager);
+        CloudCredential callerCredential = stubMintWithNullTokenId(cloudCredentialManager);
 
         assertUpdate(
             listener -> TransformUpdater.updateTransform(
@@ -1028,6 +1033,7 @@ public class TransformUpdaterTests extends ESTestCase {
                 destIndexSettings,
                 cloudCredentialManager,
                 true,
+                callerCredential,
                 listener
             ),
             updateResult -> assertThat(
@@ -1052,18 +1058,18 @@ public class TransformUpdaterTests extends ESTestCase {
 
     /**
      * Stubs {@code mintAndPersist} on the mock {@link TransformCloudCredentialManager} to simulate
-     * a successful mint that returns a null tokenId (i.e. no actual UIAM round-trip), and stubs
-     * {@code currentCallerCredential()} to return a non-null credential so that the
+     * a successful mint that returns a null tokenId (i.e. no actual UIAM round-trip). Returns a
+     * non-null {@link CloudCredential} that callers must pass as {@code callerCredential} so the
      * UIAM migration predicate in {@link TransformUpdater} evaluates to {@code true}.
      */
     @SuppressWarnings("unchecked")
-    private static void stubMintWithNullTokenId(TransformCloudCredentialManager cloudCredentialManager) {
+    private static CloudCredential stubMintWithNullTokenId(TransformCloudCredentialManager cloudCredentialManager) {
         CloudCredential fakeCredential = new CloudCredential(new SecureString("fake-caller-cred".toCharArray()));
-        when(cloudCredentialManager.currentCallerCredential()).thenReturn(fakeCredential);
         doAnswer(inv -> {
-            inv.<ActionListener<String>>getArgument(1).onResponse(null);
+            inv.<ActionListener<String>>getArgument(2).onResponse(null);
             return null;
-        }).when(cloudCredentialManager).mintAndPersist(any(), any());
+        }).when(cloudCredentialManager).mintAndPersist(any(), any(), any());
+        return fakeCredential;
     }
 
     private void assertUpdate(Consumer<ActionListener<UpdateResult>> function, Consumer<UpdateResult> furtherTests)

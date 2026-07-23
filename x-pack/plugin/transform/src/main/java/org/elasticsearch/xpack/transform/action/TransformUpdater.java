@@ -149,7 +149,7 @@ public class TransformUpdater {
         // rewrite config into a new format if necessary
         final TransformConfig rewrittenConfig = TransformConfig.rewriteForUpdate(config);
         TransformConfig appliedConfig = update != null ? update.apply(rewrittenConfig) : rewrittenConfig;
-        if (shouldDefaultProjectRoutingForUiamMigration(config, appliedConfig, update, cloudCredentialManager, mintCloudCredential)) {
+        if (shouldDefaultProjectRoutingForUiamMigration(config, appliedConfig, update, callerCredential, mintCloudCredential)) {
             logger.info(
                 "[{}] defaulting project_routing to [{}] to preserve local search scope",
                 config.getId(),
@@ -545,7 +545,8 @@ public class TransformUpdater {
      * local-only search scope. All conditions must hold:
      * <ul>
      *   <li>A UIAM credential is being minted now (feature flag on, update path, and
-     *       a cloud-managed caller credential is present in the thread context).</li>
+     *       a non-null caller-supplied cloud credential — extracted on the coordinating node and
+     *       passed in, since the thread-context transient does not survive master forwarding).</li>
      *   <li>The original config has no UIAM credential ({@code credentialId == null}), meaning
      *       this is an API-key → UIAM migration and not a re-key of an already-migrated transform.</li>
      *   <li>The incoming update does not explicitly supply a {@code source} config. Sending an
@@ -560,12 +561,10 @@ public class TransformUpdater {
         TransformConfig originalConfig,
         TransformConfig appliedConfig,
         TransformConfigUpdate update,
-        TransformCloudCredentialManager cloudCredentialManager,
+        @Nullable CloudCredential callerCredential,
         boolean mintCloudCredential
     ) {
-        if (TransformConfig.TRANSFORM_CROSS_PROJECT.isEnabled() == false
-            || mintCloudCredential == false
-            || cloudCredentialManager.currentCallerCredential() == null) {
+        if (TransformConfig.TRANSFORM_CROSS_PROJECT.isEnabled() == false || mintCloudCredential == false || callerCredential == null) {
             return false;
         }
         if (originalConfig.getCredentialId() != null) {

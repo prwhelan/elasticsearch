@@ -275,6 +275,9 @@ tests:
 - class: org.elasticsearch.indices.ShardLimitValidatorTests
   method: testValidateShardLimitOpenIndices
   issue: https://github.com/elastic/elasticsearch/issues/154859
+- class: org.elasticsearch.xpack.esql.inference.completion.CompletionOperatorTests
+  method: testInferenceFailure
+  issue: https://github.com/elastic/elasticsearch/issues/154866
 
 # Examples:
 #
